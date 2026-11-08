@@ -9,9 +9,8 @@ import java.io.File
  * dataset during the CI build. This is NOT the proprietary MaiMemo app dictionary.
  */
 object OfflineDictionary {
-    private const val VERSION = 1
     private const val DATABASE_ASSET = "ecdict.db"
-    private const val DATABASE_FILE = "ecdict-v$VERSION.db"
+    private const val DATABASE_FILE = "ecdict-v1.db"
 
     private fun openDatabase(context: Context): SQLiteDatabase? {
         val file = File(context.noBackupFilesDir, DATABASE_FILE)
