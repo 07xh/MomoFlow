@@ -31,7 +31,11 @@ record = (src / 'OfficialRecord.kt').read_text()
 inspector = (src / 'MomoInspection.kt').read_text()
 assert 'OfficialTrialStore' in trial and 'before:' in trial
 assert 'OfficialRecordComparison' in record
-assert 'ACTION_CLICK' not in inspector and 'performAction(' not in inspector
+# Inspecting an advertised ACTION_CLICK capability is read-only; invoking it is not.
+assert 'performAction(' not in inspector
+assert 'dispatchGesture(' not in inspector
+assert 'performGlobalAction(' not in inspector
+assert 'rootInActiveWindow' in inspector
 assert 'com.maimemo.android.momo' in inspector
 assert 'query_study_records' in client
 assert 'android.permission.BIND_ACCESSIBILITY_SERVICE' in manifest
