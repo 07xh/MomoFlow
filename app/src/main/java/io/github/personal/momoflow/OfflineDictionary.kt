@@ -45,7 +45,13 @@ object OfflineDictionary {
         var inserted = 0
         try {
             for (word in words) {
-                if (prefs.contains("meaning.${word.id}")) continue
+                val cached = prefs.getString("meaning.${word.id}", null)?.trim().orEmpty()
+                // Repair a placeholder saved by older builds when official meanings were empty.
+                if (cached.isNotEmpty() &&
+                    cached != "墨墨未返回公开释义" &&
+                    cached != "墨墨未返回用户自建释义" &&
+                    cached != "暂无可用释义"
+                ) continue
                 database.query(
                     "lexicon", arrayOf("translation", "phonetic"),
                     "word = ? COLLATE NOCASE", arrayOf(word.spelling.trim()),
