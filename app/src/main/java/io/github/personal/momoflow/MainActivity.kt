@@ -418,8 +418,15 @@ class MainActivity : Activity() {
             try {
                 val results = MaiMemoClient(token).meanings(word.id)
                 runOnUiThread {
-                    if (token == store.token()) store.saveMeaning(word.id,
-                        results.joinToString("\n").ifEmpty { "墨墨未返回公开释义" })
+                    if (token == store.token()) {
+                        if (results.isNotEmpty()) {
+                            store.saveMeaning(word.id, results.joinToString("\n"))
+                        } else {
+                            // Official definitions may only be user-created content.
+                            // Do not overwrite a valid ECDICT meaning with an empty API result.
+                            message = "墨墨未返回用户自建释义，继续使用本地英汉词典"
+                        }
+                    }
                     queryingWordId = null; draw()
                     LiveWordNotification.publish(this)
                 }
