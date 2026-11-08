@@ -383,6 +383,9 @@ class MainActivity : Activity() {
                 val client = MaiMemoClient(token)
                 val progress = client.progress()
                 val items = client.unfinished()
+                // Populate real Chinese meanings from a bundled MIT offline dictionary.
+                // This runs on the sync worker thread, never on the Android UI thread.
+                val offlineCount = OfflineDictionary.prefill(applicationContext, items)
                 val snapshot = StudySnapshot(StudyDay.today(), progress, items, System.currentTimeMillis())
                 runOnUiThread {
                     // If the user replaced their token during the request, discard the old account response.
@@ -391,7 +394,7 @@ class MainActivity : Activity() {
                     store.setReveal(false)
                     if (items.isEmpty()) store.setActive(false)
                     syncing = false
-                    message = if (items.isEmpty()) "已同步，但未返回待学单词；请核实墨墨当日初始化与进度。" else "已同步 ${items.size} 个真实待学单词"
+                    message = if (items.isEmpty()) "已同步，但未返回待学单词；请核实墨墨当日初始化与进度。" else "已同步 ${items.size} 个真实待学单词，本地词典补充释义 ${offlineCount} 条"
                     WordWidget.updateAll(this)
                     LiveWordNotification.publish(this)
                     draw()
