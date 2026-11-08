@@ -73,10 +73,45 @@ object LiveWordNotification {
         manager(context).notify(NOTIFICATION_ID, builder.build())
     }
 
+    /**
+     * Distinguish permission, notification eligibility and system promotion.
+     * A promoted AOSP notification is not proof of a ColorOS Fluid Cloud capsule.
+     * Only inspects this application's own currently posted notification.
+     */
     fun diagnostics(context: Context): String {
-        if (Build.VERSION.SDK_INT < 36) return "Android 16 以下：使用标准通知"
-        val allowed = manager(context).canPostPromotedNotifications()
+        if (Build.VERSION.SDK_INT < 36) return "Android 16 以下：仅支持标准通知"
         val experimental = SecureStore(context).experimentalPromotion()
-        return "实验性请求：${if (experimental) "开启" else "关闭"} · 提升权限：${if (allowed) "允许" else "未允许或不受支持"}（是否显示由系统决定）"
+        val allowed = manager(context).canPostPromotedNotifications()
+        val active = try {
+            manager(context).activeNotifications.firstOrNull { it.id == NOTIFICATION_ID }?.notification
+        } catch (_: Exception) {
+            null
+        }
+        val requestState = when {
+            active == null -> "未找到活动通知"
+            active.extras.getBoolean("android.requestPromotedOngoing", false) -> "已发送"
+            else -> "未发送"
+        }
+        val eligibility = when {
+            active == null -> "无法检查（通知未发布）"
+            active.hasPromotableCharacteristics() -> "符合 Android 提升条件"
+            else -> "不符合 Android 提升条件"
+        }
+        val promoted = when {
+            active == null -> "无法检查（通知未发布）"
+            (active.flags and Notification.FLAG_PROMOTED_ONGOING) != 0 -> "系统已标记提升"
+            else -> "系统未标记提升"
+        }
+        val channelImportance = manager(context).getNotificationChannel(CHANNEL)?.importance
+        val channelState = when (channelImportance) {
+            null -> "尚未创建"
+            NotificationManager.IMPORTANCE_NONE -> "已关闭"
+            NotificationManager.IMPORTANCE_MIN -> "过低（无法提升）"
+            else -> "正常"
+        }
+        return "实验开关：${if (experimental) "开" else "关"} · 提升权限：${if (allowed) "允许" else "未允许"}" +
+            "\\n通知渠道：$channelState · 提升请求：$requestState" +
+            "\\n资格检查：$eligibility · 实际系统标记：$promoted" +
+            "\\n注意：系统提升标记不等于 ColorOS 原生胶囊成功显示"
     }
 }
