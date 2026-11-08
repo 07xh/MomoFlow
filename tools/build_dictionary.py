@@ -59,7 +59,7 @@ def generate(input_file, output_file):
                 if not keep(row):
                     continue
                 spelling = row["word"].strip().lower()
-                meaning = re.sub(r"\\s+", " ", row["translation"]).strip()[:360]
+                meaning = re.sub(r"\s+", " ", row["translation"]).strip()[:360]
                 phonetic = (row.get("phonetic") or "").strip()[:100]
                 batch.append((spelling, meaning, phonetic))
                 if len(batch) == 1000:
