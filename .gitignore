@@ -8,3 +8,6 @@ local.properties
 *.jks
 *.keystore
 *.log
+
+# Generated from the pinned MIT ECDICT dataset by GitHub Actions
+app/src/main/assets/ecdict.db
