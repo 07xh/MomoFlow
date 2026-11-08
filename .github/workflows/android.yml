@@ -6,6 +6,7 @@ on:
 
 permissions:
   contents: read
+  issues: write
 
 jobs:
   build:
@@ -23,9 +24,11 @@ jobs:
           gradle-version: '9.4.1'
 
       - name: Install Android SDK 36
+        id: sdk
         run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
 
       - name: Source checks
+        id: source
         run: python3 tools/verify_source.py
 
       - name: Build debug APK
@@ -44,6 +47,7 @@ jobs:
           if-no-files-found: error
 
       - name: Unit tests
+        id: test
         if: steps.apk.outcome == 'success'
         shell: bash
         run: |
@@ -56,17 +60,52 @@ jobs:
         run: |
           {
             echo '## MomoFlow build failed'
-            echo 'Check the first red step above. The last Gradle failure lines are shown below.'
+            echo "Run: https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+            echo 'Check the first red step above.'
             for file in apk-build.log tests.log; do
               if [ -f "$file" ]; then
                 echo
                 echo "### $file"
                 echo '~~~'
-                grep -E '(^e: |^> Task .*FAILED|^FAILURE:|^\* What went wrong:|^Execution failed for|^Could not |^Caused by:|^\s*error:)' "$file" | tail -n 60 || true
+                grep -E '(^e: |^> Task .*FAILED|^FAILURE:|^\\* What went wrong:|^Execution failed for|^Could not |^Caused by:|error:)' "$file" | tail -n 70 || true
                 echo '~~~'
               fi
             done
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Record failure diagnostics for remote debugging
+        if: failure()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          {
+            echo "### Failed workflow run #${GITHUB_RUN_NUMBER}"
+            echo
+            echo "Run URL: https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+            echo
+            echo 'Step outcomes:'
+            echo '- Install SDK: ${{ steps.sdk.outcome }}'
+            echo '- Source checks: ${{ steps.source.outcome }}'
+            echo '- Build APK: ${{ steps.apk.outcome }}'
+            echo '- Unit tests: ${{ steps.test.outcome }}'
+            for file in apk-build.log tests.log; do
+              if [ -f "$file" ]; then
+                echo
+                echo "#### $file (last 100 lines)"
+                echo '~~~'
+                tail -n 100 "$file" | sed -E 's/gh[pousr]_[A-Za-z0-9_]+/[REDACTED]/g'
+                echo '~~~'
+              fi
+            done
+          } > /tmp/momoflow-ci-failure.md
+          issue_number="$(gh issue list --state open --search 'MomoFlow CI failure diagnostics in:title' --json number --jq '.[0].number' 2>/dev/null || true)"
+          if [ -n "$issue_number" ]; then
+            gh issue comment "$issue_number" --body-file /tmp/momoflow-ci-failure.md
+          else
+            gh issue create --title "MomoFlow CI failure diagnostics" --body-file /tmp/momoflow-ci-failure.md
+          fi
 
       - name: Upload build diagnostics
         if: always()
