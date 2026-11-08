@@ -18,14 +18,19 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
-      - uses: android-actions/setup-android@v3
+      # GitHub Ubuntu runners already provide Android SDK command-line tools.
+      # setup-android@v3 currently tries to install obsolete SDK package "tools" and fails.
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.4.1'
 
       - name: Install Android SDK 36
         id: sdk
-        run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
+        shell: bash
+        run: |
+          set -e
+          command -v sdkmanager
+          sdkmanager --install 'platforms;android-36' 'build-tools;36.0.0'
 
       - name: Source checks
         id: source
