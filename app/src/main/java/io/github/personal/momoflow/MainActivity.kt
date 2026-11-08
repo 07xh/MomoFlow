@@ -311,8 +311,11 @@ class MainActivity : Activity() {
                     OfficialTrialStore(this).save(OfficialWritebackTrial(
                         word.id, word.spelling, mark, StudyDay.today(), System.currentTimeMillis(), original
                     ))
+                    // The optional accessibility service is read-only and only scans
+                    // the official app for 2 minutes; no service/permission is auto-enabled.
+                    MomoInspectionStore(this).begin(word)
                     trialBusy = false
-                    trialStatus = "已保存官方基线。请在墨墨 App 找到 ${word.spelling}，手动点${mark.label}，返回后验证。若不是同一词，禁止提交。"
+                    trialStatus = "官方学习记录基线已保存；已准备 2 分钟只读控件识别（需事先手动开启无障碍服务）。请先核对墨墨当前单词是否为 ${word.spelling}，相同才手动点${mark.label}；不同则不要提交。返回后检查同屏识别结果，再验证官方记录。"
                     draw()
                     openMomo()
                 }
