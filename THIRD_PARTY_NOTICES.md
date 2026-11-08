@@ -7,3 +7,5 @@ This personal prototype uses/adapts ideas from the following open-source project
 
 The project does **not** include proprietary APK code from FluidWords or MaiMemo, nor ECDICT data yet.
 MaiMemo is a third-party service; this app is not affiliated with the vendor.
+
+3. **ECDICT** — https://github.com/skywind3000/ECDICT — MIT. A pinned upstream CSV source is transformed into a compact SQLite dictionary at build time. Chinese definitions and phonetics are independent from MaiMemo's proprietary built-in meanings. See `licenses/ECDICT-MIT.txt`.
