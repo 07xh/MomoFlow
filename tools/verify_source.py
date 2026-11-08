@@ -17,6 +17,10 @@ assert 'request("GET", "/interpretations?voc_id=$safeId")' in client
 assert 'get_today_items' in client and 'limit", 1000' in client
 notifier = (src / 'LiveWordNotification.kt').read_text()
 assert 'store.experimentalPromotion()' in notifier
+assert 'hasPromotableCharacteristics()' in notifier
+assert 'Notification.FLAG_PROMOTED_ONGOING' in notifier
+assert 'android.requestPromotedOngoing' in notifier
+assert 'activeNotifications' in notifier
 assert '显示释义' in notifier and '隐藏释义' in notifier
 receiver = (src / 'WordActionReceiver.kt').read_text()
 assert 'LOCAL_FORGET' not in receiver
