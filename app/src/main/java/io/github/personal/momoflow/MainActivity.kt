@@ -257,6 +257,14 @@ class MainActivity : Activity() {
         }
         trialPane.addView(gap(8))
         trialPane.addView(label("只读识别结果：${MomoInspectionStore(this).lastReport()}", 11f, muted))
+        trialPane.addView(gap(8))
+        trialPane.addView(button("复制只读识别报告（不含单词或 Token）", false) {
+            val safeReport = MomoInspectionStore(this).lastReport()
+            getSystemService(ClipboardManager::class.java).setPrimaryClip(
+                ClipData.newPlainText("MomoFlow read-only inspection", safeReport)
+            )
+            hint("已复制脱敏识别结果，可用于真机验收")
+        })
         column.addView(trialPane)
         column.addView(gap(14))
 
