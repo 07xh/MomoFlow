@@ -41,7 +41,7 @@ object LiveWordNotification {
         if (!store.active() || !store.isToday(snap) || snap.words.isEmpty()) return stop(context)
         if (!canPost(context)) return
         val word = snap.words[store.index().coerceIn(0, snap.words.lastIndex)]
-        val shownMeaning = if (store.reveal()) store.cachedMeaning(word.id) ?: "释义请在 App 内查询" else "轻触应用查看释义"
+        val shownMeaning = if (store.reveal()) store.cachedMeaning(word.id) ?: "暂无离线释义，请在助手内重新同步" else "轻触应用查看释义"
         manager(context).createNotificationChannel(NotificationChannel(CHANNEL, "正在背词", NotificationManager.IMPORTANCE_DEFAULT).apply {
             description = "由用户主动开启的背词会话"
         })
