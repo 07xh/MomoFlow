@@ -16,7 +16,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 UPSTREAM_COMMIT = "39cfb9672c0906b63569e0453c2e6abfb9ab182a"
 SOURCE_URL = (
     "https://raw.githubusercontent.com/skywind3000/ECDICT/"
-    + UPSTREAM_COMMIT + "/ecdict.mini.csv"
+    + UPSTREAM_COMMIT + "/ecdict.csv"
 )
 DEFAULT_OUTPUT = REPO_ROOT / "app/src/main/assets/ecdict.db"
 IMPORTANT_TAGS = {"gk", "zk", "cet4", "cet6", "ky", "toefl", "ielts", "gre", "oxford"}
@@ -86,7 +86,7 @@ def main():
         generate(args.input, args.output)
         return
     with tempfile.TemporaryDirectory(prefix="momoflow-ecdict-") as directory:
-        temp_file = Path(directory) / "ecdict.mini.csv"
+        temp_file = Path(directory) / "ecdict.csv"
         request = urllib.request.Request(SOURCE_URL, headers={"User-Agent": "MomoFlow-Android-Build"})
         with urllib.request.urlopen(request, timeout=120) as response, temp_file.open("wb") as target:
             while True:
