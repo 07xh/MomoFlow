@@ -532,7 +532,7 @@ class MainActivity : Activity() {
     /** Safe to paste into a support conversation: never reads or prints token, vocabulary or account data. */
     private fun copyDiagnostics() {
         val report = buildString {
-            appendLine("MomoFlow 0.5.1 · 设备诊断（不含账号数据）")
+            appendLine("MomoFlow 0.5.2 · 设备诊断（不含账号数据）")
             appendLine("设备：${Build.MANUFACTURER} ${Build.MODEL}; SDK ${Build.VERSION.SDK_INT}")
             appendLine("通知权限：${if (LiveWordNotification.canPost(this@MainActivity)) "允许" else "未允许"}")
             appendLine(LiveWordNotification.diagnostics(this@MainActivity))
