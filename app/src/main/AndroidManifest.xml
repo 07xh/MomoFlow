@@ -11,11 +11,11 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
-        <!-- Optional read-only page diagnosis. User explicitly enables it in system settings. -->
+        <!-- Optional scoped inspection; user additionally opts into one-shot foreground feedback. -->
         <service android:name=".MomoInspectionService"
             android:exported="true"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
-            android:label="墨墨页面只读诊断">
+            android:label="墨墨页面诊断与单次反馈">
             <intent-filter>
                 <action android:name="android.accessibilityservice.AccessibilityService"/>
             </intent-filter>
