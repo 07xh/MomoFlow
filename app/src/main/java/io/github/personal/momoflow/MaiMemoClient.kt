@@ -59,6 +59,22 @@ class MaiMemoClient(private val token: String) {
         return value
     }
 
+    /**
+     * Query one official TODAY item, regardless of its finished state.
+     * This deliberately omits is_finished so a completed word remains visible.
+     * The response's first_response and is_finished are only read, never modified.
+     */
+    fun todayState(vocId: String): OfficialTodayState? {
+        val payload = JSONObject()
+            .put("voc_ids", org.json.JSONArray().put(vocId))
+            .put("limit", 1)
+        val array = request("POST", "/study/get_today_items", payload).getJSONArray("today_items")
+        if (array.length() == 0) return null
+        val value = OfficialTodayState.parse(array.getJSONObject(0))
+        if (value.vocId != vocId) throw ApiException("今日词条的单词 ID 与查询不一致")
+        return value
+    }
+
     fun meanings(vocId: String): List<String> {
         val safeId = URLEncoder.encode(vocId, "UTF-8")
         val array = request("GET", "/interpretations?voc_id=$safeId").getJSONArray("interpretations")
