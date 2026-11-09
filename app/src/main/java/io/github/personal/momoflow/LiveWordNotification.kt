@@ -18,15 +18,19 @@ object LiveWordNotification {
     private const val NOTIFICATION_ID = 2208
     private fun manager(context: Context) = context.getSystemService(NotificationManager::class.java)
 
-    private fun action(context: Context, name: String, requestCode: Int, vocId: String? = null): PendingIntent {
-        val intent = Intent(context, WordActionReceiver::class.java).setAction(name)
-        // Unique PendingIntent identity per displayed word; stale cards cannot act on a different word.
-        if (vocId != null) {
-            intent.putExtra(WordActionReceiver.WORD_ID, vocId)
-            intent.data = Uri.parse("momoflow://word-action/${Uri.encode(name)}/${Uri.encode(vocId)}")
-        }
-        return PendingIntent.getBroadcast(context, requestCode, intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+    private fun officialTrialAction(context: Context, wordId: String, mark: LocalMark, requestCode: Int): PendingIntent {
+        // PendingIntent.getActivity is user initiated and works with modern background launch rules.
+        // URI identity includes both word and feedback type so old notifications cannot be reused.
+        val intent = Intent(context, MainActivity::class.java)
+            .setAction(MainActivity.ACTION_START_OFFICIAL_TRIAL)
+            .setData(Uri.parse("momoflow://official-trial/${Uri.encode(wordId)}/${Uri.encode(mark.wire)}"))
+            .putExtra(MainActivity.EXTRA_TRIAL_WORD_ID, wordId)
+            .putExtra(MainActivity.EXTRA_TRIAL_MARK, mark.wire)
+            .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        return PendingIntent.getActivity(
+            context, requestCode, intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
     }
 
 
@@ -52,16 +56,20 @@ object LiveWordNotification {
             .setSmallIcon(android.R.drawable.ic_menu_info_details)
             .setContentTitle(word.spelling)
             .setContentText(shownMeaning)
-            .setSubText("墨墨 · 今日 ${snap.progress.finished}/${snap.progress.total}")
+            .setSubText("墨墨 · ${snap.progress.finished}/${snap.progress.total} · 点选后需在官方 App 手动反馈")
             .setContentIntent(open)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setShowWhen(false)
             .setCategory(Notification.CATEGORY_SERVICE)
-            .addAction(Notification.Action.Builder(null, "下一个", action(context, WordActionReceiver.NEXT, 2, word.id)).build())
-            .addAction(Notification.Action.Builder(null, if (store.reveal()) "隐藏释义" else "显示释义",
-                action(context, WordActionReceiver.REVEAL, 3, word.id)).build())
-            .addAction(Notification.Action.Builder(null, "结束", action(context, WordActionReceiver.STOP, 4)).build())
+            // All three actions initiate a manual same-word official App verification.
+            // None sends a private write request or updates the user's official progress.
+            .addAction(Notification.Action.Builder(null, "认识·验证",
+                officialTrialAction(context, word.id, LocalMark.FAMILIAR, 11)).build())
+            .addAction(Notification.Action.Builder(null, "模糊·验证",
+                officialTrialAction(context, word.id, LocalMark.VAGUE, 12)).build())
+            .addAction(Notification.Action.Builder(null, "忘记·验证",
+                officialTrialAction(context, word.id, LocalMark.FORGET, 13)).build())
         if (Build.VERSION.SDK_INT >= 36 && store.experimentalPromotion()) {
             builder.setShortCriticalText(word.spelling.take(7))
             // The OS decides whether to promote this notification; this does not guarantee a capsule.
