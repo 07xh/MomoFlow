@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -17,7 +18,11 @@ import android.provider.Settings
 import android.text.InputType
 import android.view.Gravity
 import android.view.View
+import android.view.WindowInsetsController
+import android.view.WindowInsets
 import android.widget.Button
+import android.widget.FrameLayout
+import android.widget.Switch
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ProgressBar
@@ -33,9 +38,16 @@ class MainActivity : Activity() {
     }
 
     private val store by lazy { SecureStore(this) }
-    private val ink = Color.parseColor("#142D54")
-    private val muted = Color.parseColor("#667D9B")
-    private val accent = Color.parseColor("#2563C8")
+    private val ink = Color.parseColor("#17212D")
+    private val muted = Color.parseColor("#687482")
+    private val accent = Color.parseColor("#267764")
+    private var page = 0
+    private var drawnPage = 0
+    private val scrollPositions = intArrayOf(0, 0)
+    private var activeScroller: ScrollView? = null
+    private var restoringScroll = false
+    private var requestGeneration = 0
+    private var connectionGeneration = 0
     private var syncing = false
     private var trialBusy = false
     private var trialStatus = ""
@@ -44,9 +56,15 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        window.statusBarColor = Color.parseColor("#F4F8FF")
-        window.navigationBarColor = Color.parseColor("#F4F8FF")
-        window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+        page = savedInstanceState?.getInt("page", 0)?.coerceIn(0, 1) ?: 0
+        savedInstanceState?.getIntArray("scroll")?.let { values ->
+            values.take(2).forEachIndexed { i, value -> scrollPositions[i] = value }
+        }
+        if (Build.VERSION.SDK_INT >= 30) window.setDecorFitsSystemWindows(false)
+        else window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LAYOUT_STABLE or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+        window.statusBarColor = Color.TRANSPARENT
+        window.navigationBarColor = Color.TRANSPARENT
+        window.decorView.systemUiVisibility = window.decorView.systemUiVisibility or View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
         trialStatus = OfficialTrialStore(this).lastReport()
         draw()
         handleNotificationTrial(intent)
@@ -66,7 +84,11 @@ class MainActivity : Activity() {
         if (incoming?.action != ACTION_START_OFFICIAL_TRIAL) return
         // Consume this explicit tap once; Activity recreation must not resubmit a trial.
         incoming.action = Intent.ACTION_MAIN
+        page = 0
         val snapshot = store.snapshot()
+        if (trialBusy || OfficialTrialStore(this).pending() != null) {
+            hint("请先核对或结束上一次反馈"); draw(); return
+        }
         val selected = NotificationTrialGate.select(
             snapshot = snapshot,
             isToday = snapshot?.let(store::isToday) == true,
@@ -98,12 +120,24 @@ class MainActivity : Activity() {
         }
     }
 
+    override fun onDestroy() {
+        requestGeneration++
+        super.onDestroy()
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        if (!restoringScroll) activeScroller?.let { scrollPositions[drawnPage] = it.scrollY }
+        outState.putInt("page", page)
+        outState.putIntArray("scroll", scrollPositions)
+        super.onSaveInstanceState(outState)
+    }
+
     private fun dp(v: Int) = (resources.displayMetrics.density * v).toInt()
     private fun gap(v: Int) = View(this).apply { layoutParams = LinearLayout.LayoutParams(1, dp(v)) }
     private fun label(value: String, sp: Float = 15f, color: Int = ink, bold: Boolean = false): TextView = TextView(this).apply {
         text = value; textSize = sp; setTextColor(color)
         if (bold) setTypeface(typeface, Typeface.BOLD)
-        includeFontPadding = true
+        setLineSpacing(dp(2).toFloat(), 1.05f)
     }
     private fun rounded(color: Int, radius: Int = 20, border: Int? = null) = GradientDrawable().apply {
         setColor(color); cornerRadius = dp(radius).toFloat()
@@ -111,342 +145,417 @@ class MainActivity : Activity() {
     }
     private fun pane(): LinearLayout = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
-        background = rounded(Color.WHITE, 22, Color.parseColor("#DFE8F5"))
-        setPadding(dp(20), dp(18), dp(20), dp(18))
-        elevation = dp(1).toFloat()
+        background = rounded(Color.WHITE, 24)
+        setPadding(dp(20), dp(20), dp(20), dp(20))
     }
     private fun button(text: String, filled: Boolean = true, action: () -> Unit): Button = Button(this).apply {
         this.text = text; textSize = 14f; isAllCaps = false
         setTextColor(if (filled) Color.WHITE else accent)
-        background = rounded(if (filled) accent else Color.parseColor("#E9F2FF"), 14)
-        setPadding(dp(12), dp(8), dp(12), dp(8))
+        background = rounded(if (filled) accent else Color.parseColor("#EDF4F1"), 14)
+        backgroundTintList = null
+        stateListAnimator = null; elevation = 0f; translationZ = 0f
+        minHeight = dp(48); minimumHeight = dp(48)
+        minWidth = 0; minimumWidth = 0
+        setPadding(dp(10), dp(12), dp(10), dp(12))
         setOnClickListener { action() }
     }
     private fun horizontal(vararg children: View): LinearLayout = LinearLayout(this).apply {
         orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
         children.forEachIndexed { i, child ->
             if (i > 0) addView(View(this@MainActivity), LinearLayout.LayoutParams(dp(8), 1))
-            addView(child, LinearLayout.LayoutParams(0, dp(48), 1f))
+            addView(child, LinearLayout.LayoutParams(0, -2, 1f))
         }
     }
     private fun hint(text: String) { Toast.makeText(this, text, Toast.LENGTH_LONG).show() }
-
+    private fun section(column: LinearLayout, block: LinearLayout.() -> Unit) {
+        column.addView(pane().apply(block)); column.addView(gap(14))
+    }
+    private fun showDetails(title: String, text: String) {
+        val body = label(text, 14f, muted).apply {
+            setPadding(dp(22), dp(12), dp(22), dp(20)); setTextIsSelectable(true)
+        }
+        AlertDialog.Builder(this).setTitle(title)
+            .setView(ScrollView(this).apply { addView(body) })
+            .setPositiveButton("知道了", null).show()
+    }
     private fun draw() {
-        val scroller = ScrollView(this).apply { isFillViewport = true; setBackgroundColor(Color.parseColor("#F4F8FF")) }
+        if (isDestroyed || isFinishing) return
+        if (!restoringScroll) activeScroller?.let { scrollPositions[drawnPage] = it.scrollY }
+        drawnPage = page
+        restoringScroll = true
+        val frame = FrameLayout(this).apply { setBackgroundColor(Color.parseColor("#F5F7F6")) }
+        val scroller = ScrollView(this).apply { isFillViewport = true; isVerticalScrollBarEnabled = false }
+        activeScroller = scroller
+        frame.addView(scroller, FrameLayout.LayoutParams(
+            minOf(resources.displayMetrics.widthPixels, dp(640)), -1, Gravity.CENTER_HORIZONTAL
+        ))
+        frame.setOnApplyWindowInsetsListener { view, insets ->
+            if (Build.VERSION.SDK_INT >= 30) {
+                val safe = insets.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout() or WindowInsets.Type.ime())
+                view.setPadding(safe.left, safe.top, safe.right, safe.bottom)
+                scroller.layoutParams = (scroller.layoutParams as FrameLayout.LayoutParams).apply {
+                    width = minOf(dp(640), resources.displayMetrics.widthPixels - safe.left - safe.right)
+                }
+            } else {
+                view.setPadding(insets.systemWindowInsetLeft, insets.systemWindowInsetTop,
+                    insets.systemWindowInsetRight, insets.systemWindowInsetBottom)
+            }
+            insets
+        }
         val column = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(18), dp(26), dp(18), dp(28))
+            setPadding(dp(20), dp(22), dp(20), dp(24))
         }
         scroller.addView(column)
-        setContentView(scroller)
-
-        column.addView(label("墨墨 · 流云背词", 27f, ink, true))
-        column.addView(gap(6))
-        column.addView(label("非官方个人学习助手 · 真实数据来自墨墨开放 API", 12f, muted))
+        setContentView(frame); frame.requestApplyInsets()
+        if (Build.VERSION.SDK_INT >= 30) {
+            val appearance = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
+            window.insetsController?.setSystemBarsAppearance(appearance, appearance)
+        }
+        column.addView(label("墨墨流云", 28f, ink, true))
+        column.addView(gap(4))
+        column.addView(label(if (page == 0) "把注意力留给眼前这个词" else "连接与使用偏好", 13f, muted))
         column.addView(gap(20))
-
-        val tokenPane = pane()
-        tokenPane.addView(label("账号连接", 16f, ink, true))
-        tokenPane.addView(gap(8))
-        tokenPane.addView(label(if (store.token() == null) "尚未连接墨墨。Token 仅保存在本机加密存储中。" else "已保存个人 Token（不会在界面或日志中显示）", 12f, muted))
-        tokenPane.addView(gap(12))
-        val entry = EditText(this).apply {
-            hint = "粘贴墨墨开放 API Token"
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
-            textSize = 14f
-            setSingleLine(true)
-            background = rounded(Color.parseColor("#F1F6FF"), 12, Color.parseColor("#D8E6F7"))
-            setPadding(dp(12), dp(8), dp(12), dp(8))
-        }
-        tokenPane.addView(entry, LinearLayout.LayoutParams(-1, dp(49)))
-        tokenPane.addView(gap(10))
-        tokenPane.addView(horizontal(
-            button(if (store.token() == null) "保存 Token" else "更换 Token") {
-                val token = entry.text.toString().trim()
-                if (token.isBlank()) { hint("请输入 Token"); return@button }
-                try {
-                    LiveWordNotification.stop(this)
-                    store.clearStudyData() // no cross-account vocabulary leakage
-                    store.saveToken(token)
-                    WordWidget.updateAll(this)
-                    message = "Token 已保存，请点击同步；今天需先在墨墨 App 完成初始化。"
-                    draw()
-                } catch (_: Exception) { hint("Token 保存失败，请检查设备安全设置") }
-            },
-            button("清除授权", false) {
-                LiveWordNotification.stop(this)
-                store.forgetToken(); store.clearStudyData(); message = "授权与学习缓存已清除"; draw()
-                WordWidget.updateAll(this)
+        column.addView(horizontal(*arrayOf("背词", "设置").mapIndexed { index, title ->
+            button(title, page == index) { page = index; draw() }.apply { isSelected = page == index }
+        }.toTypedArray()))
+        column.addView(gap(20))
+        if (page == 0) drawStudy(column) else drawSettings(column)
+        scroller.post {
+            if (activeScroller === scroller) {
+                scroller.scrollTo(0, scrollPositions[drawnPage])
+                restoringScroll = false
             }
-        ))
-        column.addView(tokenPane)
-        column.addView(gap(14))
-
-        val snapshot = store.snapshot()?.takeIf { store.isToday(it) }
-        val studyPane = pane()
-        studyPane.addView(label("今日墨墨学习", 16f, ink, true))
-        studyPane.addView(gap(8))
-        if (snapshot == null) {
-            studyPane.addView(label("还没有同步到今日真实数据。请先打开墨墨，再在这里同步。", 13f, muted))
-        } else {
-            studyPane.addView(label("${snapshot.progress.finished} / ${snapshot.progress.total}", 31f, accent, true))
-            studyPane.addView(label("已完成 / 今日总量 · 未完成词 ${snapshot.words.size} 个", 12f, muted))
-            val bar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
-                max = snapshot.progress.total.coerceAtLeast(1)
-                progress = snapshot.progress.finished.coerceIn(0, max)
-                progressTintList = android.content.res.ColorStateList.valueOf(accent)
-            }
-            studyPane.addView(gap(8))
-            studyPane.addView(bar, LinearLayout.LayoutParams(-1, dp(7)))
-            studyPane.addView(gap(8))
-            studyPane.addView(label("最后同步：${java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date(snapshot.updatedAtMs))}", 11f, muted))
         }
-        val localCounts = LocalFeedbackStore(this).counts()
-        val localTotal = localCounts.values.sum()
-        studyPane.addView(gap(8))
-        studyPane.addView(label("本地练习 $localTotal 词（认识 ${localCounts[LocalMark.FAMILIAR] ?: 0} · 模糊 ${localCounts[LocalMark.VAGUE] ?: 0} · 忘记 ${localCounts[LocalMark.FORGET] ?: 0}），不计入墨墨进度", 11f, muted))
-        studyPane.addView(gap(12))
-        val sync = button(if (syncing) "正在同步…" else "同步今日单词") { refresh() }
-        sync.isEnabled = !syncing && store.token() != null
-        studyPane.addView(sync)
-        if (message.isNotBlank()) { studyPane.addView(gap(9)); studyPane.addView(label(message, 12f, muted)) }
-        column.addView(studyPane)
-        column.addView(gap(14))
+    }
 
+    private fun drawStudy(column: LinearLayout) {
+        val snapshot = store.snapshot()?.takeIf(store::isToday)
+        val pending = OfficialTrialStore(this).pending()
+        section(column) {
+            addView(label("今日学习", 14f, muted, true)); addView(gap(10))
+            if (snapshot == null) {
+                addView(label(if (store.token() == null) "连接墨墨，开始今天的学习" else "同步今天的待学单词", 21f, ink, true))
+                addView(gap(8)); addView(label("先在墨墨 App 初始化今日学习，再同步到这里。", 13f, muted))
+            } else {
+                addView(label("${snapshot.progress.finished} / ${snapshot.progress.total}", 32f, accent, true))
+                addView(label("墨墨已完成 / 今日总量", 12f, muted))
+                addView(gap(10))
+                addView(ProgressBar(this@MainActivity, null, android.R.attr.progressBarStyleHorizontal).apply {
+                    max = snapshot.progress.total.coerceAtLeast(1)
+                    progress = snapshot.progress.finished.coerceIn(0, max)
+                    progressTintList = android.content.res.ColorStateList.valueOf(accent)
+                }, LinearLayout.LayoutParams(-1, dp(6)))
+                addView(gap(10))
+                addView(label("待学 ${snapshot.words.size} 词 · 更新于 ${java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date(snapshot.updatedAtMs))}", 12f, muted))
+            }
+            addView(gap(14))
+            addView(button(if (store.token() == null) "连接墨墨" else if (syncing) "正在同步…" else "同步今日单词", snapshot == null) {
+                if (store.token() == null) { page = 1; draw(); editToken() } else refresh()
+            }.apply { isEnabled = !syncing && !trialBusy && pending == null })
+            if (message.isNotBlank()) { addView(gap(10)); addView(label(message, 12f, muted)) }
+        }
         if (snapshot != null && snapshot.words.isNotEmpty()) {
             val index = store.index().coerceIn(0, snapshot.words.lastIndex)
             val word = snapshot.words[index]
-            val wordPane = pane()
-            wordPane.addView(label("今日待学 · ${index + 1} / ${snapshot.words.size}", 12f, accent, true))
-            wordPane.addView(gap(18))
-            wordPane.addView(label(word.spelling, 34f, ink, true))
-            wordPane.addView(gap(10))
-            val meaning = store.cachedMeaning(word.id)
-            if (store.reveal()) wordPane.addView(label(meaning ?: "还没有读取到释义", 14f, muted))
-            else wordPane.addView(label("释义已隐藏", 14f, muted))
-            wordPane.addView(gap(16))
-            wordPane.addView(horizontal(
-                button("上一个", false) { move(-1, snapshot.words.size) },
-                button("下一个") { move(1, snapshot.words.size) }
-            ))
-            wordPane.addView(gap(10))
-            wordPane.addView(horizontal(
-                button(if (store.reveal()) "隐藏释义" else "显示释义", false) {
-                    store.setReveal(!store.reveal()); draw()
-                    if (store.reveal() && store.cachedMeaning(word.id) == null) queryMeaning(word)
-                    LiveWordNotification.publish(this)
-                },
-                button(if (queryingWordId == word.id) "查询中…" else "查墨墨释义", false) { queryMeaning(word) }
-            ))
-            wordPane.addView(gap(12))
-            val mark = LocalFeedbackStore(this).markFor(word.id)
-            if (mark != null) wordPane.addView(label("上次本地记录：${mark.label}", 12f, muted))
-            wordPane.addView(gap(10))
-            wordPane.addView(label("本地学习反馈（不会同步到墨墨）", 12f, accent, true))
-            wordPane.addView(gap(8))
-            wordPane.addView(horizontal(
-                button("认识", false) { recordLocal(word, LocalMark.FAMILIAR) },
-                button("模糊", false) { recordLocal(word, LocalMark.VAGUE) },
-                button("忘记", false) { recordLocal(word, LocalMark.FORGET) }
-            ))
-            wordPane.addView(gap(12))
-            wordPane.addView(label("这些反馈只保存在本机，不会改变墨墨的学习完成状态和下次复习日期。", 11f, muted))
-            column.addView(wordPane)
-            column.addView(gap(14))
-        } else if (snapshot != null) {
-            val noWords = pane()
-            noWords.addView(label(if (snapshot.progress.total == 0) "今日没有返回单词，请确认墨墨 App 已初始化并开启自动同步。" else "当前未返回待学习单词，可能已完成或仍在同步中。", 13f, muted))
-            column.addView(noWords)
-            column.addView(gap(14))
-        }
-
-        val trialPane = pane()
-        trialPane.addView(label("墨墨真实回写 · 验证模式", 16f, ink, true))
-        trialPane.addView(gap(8))
-        trialPane.addView(label("当前为人工提交实验：先记录墨墨官方基线，再在墨墨原 App 完成同一词的反馈，返回后比较官方记录。不会直接向墨墨提交记忆反馈。", 12f, muted))
-        val pending = OfficialTrialStore(this).pending()
-        if (snapshot != null && snapshot.words.isNotEmpty()) {
-            val word = snapshot.words[store.index().coerceIn(0, snapshot.words.lastIndex)]
-            trialPane.addView(gap(12))
-            trialPane.addView(label("验证墨墨真实反馈 · 当前默认词：${word.spelling}", 13f, ink, true))
-            trialPane.addView(gap(6))
-            trialPane.addView(label("可输入墨墨原 App 当前显示的英文词（必须在今日待学词表中）。留空则使用默认词，提交前仍需核对完全一致。", 11f, muted))
-            trialPane.addView(gap(7))
-            val trialSpelling = EditText(this).apply {
-                hint = "墨墨当前单词（英文）"
-                setSingleLine(true)
-                inputType = InputType.TYPE_CLASS_TEXT
-                textSize = 14f
-                background = rounded(Color.parseColor("#F1F6FF"), 12, Color.parseColor("#D8E6F7"))
-                setPadding(dp(12), dp(8), dp(12), dp(8))
-            }
-            trialPane.addView(trialSpelling, LinearLayout.LayoutParams(-1, dp(49)))
-            trialPane.addView(gap(8))
-            trialPane.addView(horizontal(
-                button("认识 · 验证", false) { startTrialForSpelling(snapshot, word, trialSpelling.text.toString(), LocalMark.FAMILIAR) },
-                button("模糊 · 验证", false) { startTrialForSpelling(snapshot, word, trialSpelling.text.toString(), LocalMark.VAGUE) },
-                button("忘记 · 验证", false) { startTrialForSpelling(snapshot, word, trialSpelling.text.toString(), LocalMark.FORGET) }
-            ))
-            trialPane.addView(gap(10))
-            trialPane.addView(button("只读识别墨墨背词页面控件（2 分钟）", false) { inspectMomo(word) })
-            trialPane.addView(gap(6))
-            trialPane.addView(label("如需控件识别，请先在系统无障碍设置里手动开启“墨墨页面只读诊断”。它仅识别墨墨包名、当前目标词及三个反馈按钮，不执行点击。", 11f, muted))
-            trialPane.addView(gap(7))
-            trialPane.addView(button("打开无障碍服务设置", false) {
-                startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-            })
-        }
-        trialPane.addView(gap(12))
-        if (pending != null) {
-            trialPane.addView(label("待核对：${pending.spelling} · ${pending.expected.label}", 12f, accent, true))
-            trialPane.addView(gap(5))
-            trialPane.addView(label("先确认墨墨原 App 显示的是同一个词，在那里手动反馈，再回到此处验证。", 11f, muted))
-            trialPane.addView(gap(8))
-            trialPane.addView(horizontal(
-                button(if (trialBusy) "核对中…" else "验证官方记录") { verifyOfficialTrial() },
-                button("取消本次验证", false) {
-                    OfficialTrialStore(this).clear()
-                    trialStatus = "已取消验证，未向墨墨提交任何操作。"
-                    draw()
+            section(column) {
+                addView(label("当前单词  ${index + 1} / ${snapshot.words.size}", 12f, accent, true))
+                addView(gap(18))
+                addView(label(word.spelling, 38f, ink, true).apply { setTextIsSelectable(true) })
+                addView(gap(14))
+                if (store.reveal()) {
+                    addView(label(store.cachedMeaning(word.id) ?: "暂无释义，可尝试查询公开释义", 16f, muted))
+                    if (store.cachedMeaning(word.id) != null) {
+                        addView(gap(6)); addView(label(when (store.meaningSource(word.id)) {
+                            "official" -> "墨墨开放 API 公开释义"
+                            "offline" -> "ECDICT 离线词典"
+                            else -> "旧版缓存 · 来源待重新查询"
+                        }, 11f, muted))
+                    }
                 }
-            ))
-        }
-        if (trialBusy) { trialPane.addView(gap(8)); trialPane.addView(label("正在读取官方数据…", 12f, muted)) }
-        if (trialStatus.isNotBlank()) {
-            trialPane.addView(gap(8)); trialPane.addView(label(trialStatus, 12f, muted))
-        }
-        val officialReport = OfficialTrialStore(this).lastReport()
-        if (officialReport.isNotBlank()) {
-            trialPane.addView(gap(7))
-            trialPane.addView(button("复制官方状态对照结果（不含 Token 或单词 ID）", false) {
-                getSystemService(ClipboardManager::class.java).setPrimaryClip(
-                    ClipData.newPlainText("MomoFlow official readback", officialReport)
-                )
-                hint("已复制官方只读对照结果；这是状态观察，不代表 MomoFlow 已写回")
-            })
-        }
-        trialPane.addView(gap(8))
-        trialPane.addView(label("前台回写尝试：${OfficialForegroundActionStore(this).summary()}", 11f, muted))
-        trialPane.addView(gap(5))
-        trialPane.addView(label("只读页面识别：${MomoInspectionStore(this).lastReport()}", 11f, muted))
-        trialPane.addView(gap(8))
-        trialPane.addView(button("复制只读识别报告（不含单词或 Token）", false) {
-            val safeReport = MomoInspectionStore(this).lastReport()
-            getSystemService(ClipboardManager::class.java).setPrimaryClip(
-                ClipData.newPlainText("MomoFlow read-only inspection", safeReport)
-            )
-            hint("已复制脱敏识别结果，可用于真机验收")
-        })
-        column.addView(trialPane)
-        column.addView(gap(14))
-
-        val toolsPane = pane()
-        toolsPane.addView(label("流体云与快捷入口", 16f, ink, true))
-        toolsPane.addView(gap(6))
-        toolsPane.addView(label("通知三档按钮可选启用“墨墨前台单次反馈”。这是由墨墨自身处理的前台操作，并非未公开接口或纯后台写入；官方完成情况以回读为准。", 11f, muted))
-        toolsPane.addView(gap(8))
-        toolsPane.addView(button(if (store.autoFeedbackEnabled()) "关闭前台自动反馈" else "开启前台自动反馈（主动授权）", false) {
-            val enable = !store.autoFeedbackEnabled()
-            store.setAutoFeedbackEnabled(enable)
-            if (!enable) OfficialForegroundActionStore(this).clear()
-            LiveWordNotification.publish(this)
-            draw()
-            if (enable && !MomoInspectionService.isUserEnabled(this)) {
-                hint("请在系统无障碍设置中手动开启“墨墨页面诊断与单次反馈”，否则仅使用原有人工验证。")
+                addView(gap(12))
+                addView(button(if (store.reveal()) "收起释义" else "显示释义", false) {
+                    val reveal = !store.reveal(); store.setReveal(reveal); draw()
+                    if (reveal && !store.officialMeaningCheckedToday(word.id)) queryMeaning(word)
+                    LiveWordNotification.publish(this@MainActivity)
+                })
+                addView(gap(16))
+                val automatic = store.autoFeedbackEnabled() && MomoInspectionService.isUserEnabled(this@MainActivity)
+                addView(label(if (automatic) "反馈将切换到墨墨，在同词页面尝试一次点击。" else "反馈将打开墨墨，核对同词后手动提交。", 12f, muted))
+                addView(gap(10))
+                addView(horizontal(*LocalMark.entries.map { mark ->
+                    button(mark.label, mark == LocalMark.FAMILIAR) {
+                        if (automatic && !store.active()) { hint("请先开始背词会话，再进行前台自动反馈"); return@button }
+                        startOfficialTrial(word, mark, autoAttempt = store.autoFeedbackEnabled())
+                    }.apply { isEnabled = !trialBusy && !syncing && pending == null }
+                }.toTypedArray()))
+                addView(gap(10))
+                addView(horizontal(
+                    button("上一个", false) { move(-1, snapshot.words.size) }.apply { isEnabled = !trialBusy && pending == null },
+                    button("下一个", false) { move(1, snapshot.words.size) }.apply { isEnabled = !trialBusy && pending == null }
+                ))
+                addView(gap(8)); addView(button("按拼写切换单词", false) { pickWord() }.apply { isEnabled = !trialBusy && pending == null })
             }
-        })
-        toolsPane.addView(gap(5))
-        toolsPane.addView(label("默认关闭。需另外在系统无障碍设置里开启服务；只有你主动点通知按钮才会为当前单词授权一次操作，60 秒过期，错词绝不执行。", 11f, muted))
-        toolsPane.addView(gap(8))
-        toolsPane.addView(label(LiveWordNotification.diagnostics(this), 12f, muted))
-        if (Build.VERSION.SDK_INT >= 36) {
-            toolsPane.addView(gap(8))
-            toolsPane.addView(button(if (store.experimentalPromotion()) "关闭实验性流体云请求" else "开启实验性流体云请求", false) {
-                store.setExperimentalPromotion(!store.experimentalPromotion())
-                LiveWordNotification.publish(this)
-                draw()
-            })
-            toolsPane.addView(gap(5))
-            toolsPane.addView(label("关闭时仅发送标准通知。开启也不保证 ColorOS 展示为流体云；仅适合用户主动开始的学习会话。", 11f, muted))
-            toolsPane.addView(gap(8))
-            toolsPane.addView(button("检查系统实时通知 / 流体云开关", false) {
-                openPromotionSettings()
-            })
-            toolsPane.addView(gap(5))
-            toolsPane.addView(label("部分一加系统还需要单独开启「在流体云显示实时通知」。如系统没有该入口，将打开本应用的通知设置。", 11f, muted))
+            section(column) {
+                addView(label(if (store.active()) "背词会话进行中" else "在通知与流体云中背词", 16f, ink, true))
+                addView(gap(6)); addView(label("启动后可从通知操作。流体云的展示形式由系统决定。", 12f, muted))
+                addView(gap(12))
+                addView(button(if (store.active()) "结束背词" else "开始背词") { toggleSession() })
+            }
+        } else if (snapshot != null) {
+            section(column) {
+                addView(label(if (snapshot.progress.total > 0 && snapshot.progress.finished >= snapshot.progress.total) "今日学习已完成" else "暂时没有待学单词", 22f, ink, true))
+                addView(gap(8)); addView(label("可打开墨墨确认学习计划，或稍后再次同步。", 13f, muted))
+                addView(gap(12)); addView(button("打开墨墨", false) { openMomo() })
+            }
         }
-        toolsPane.addView(gap(10))
-        toolsPane.addView(horizontal(
-            button(if (store.active()) "结束背词会话" else "启动背词会话") { toggleSession() },
-            button("打开墨墨", false) { openMomo() }
-        ))
-        toolsPane.addView(gap(10))
-        toolsPane.addView(label("可在系统桌面的小组件列表中添加「墨墨流云助手」。流体云显示由 ColorOS 决定。", 12f, muted))
-        toolsPane.addView(gap(8))
-        toolsPane.addView(button("复制设备兼容性诊断（不含 Token）", false) { copyDiagnostics() })
-        column.addView(toolsPane)
-        column.addView(gap(16))
-        column.addView(label("开放 API 用于读取与回验；可选无障碍服务在明确授权的前台同词场景只尝试点击一次，不改变其他 App、不读取账号资料。无需 Root。", 11f, muted))
+        if (pending != null || trialBusy || trialStatus.isNotBlank()) section(column) {
+            addView(label(if (trialBusy) "正在核对官方记录…" else if (pending != null) "本次反馈待核对" else "最近反馈结果", 16f, ink, true))
+            if (pending != null) {
+                addView(gap(8)); addView(label("${pending.spelling} · ${pending.expected.label}", 16f, accent, true))
+                addView(gap(6)); addView(label("返回后点击核对；自动点击成功派发后会自动读回一次，同步延迟时可重查。", 12f, muted))
+                addView(gap(12)); addView(button(if (trialBusy) "核对中…" else "重新核对官方记录") { verifyOfficialTrial() }.apply { isEnabled = !trialBusy })
+            }
+            if (!trialBusy) OfficialTrialStore(this@MainActivity).lastStatus()?.let { status ->
+                val summary = when (status) {
+                    OfficialSyncStatus.OBSERVED_MATCH -> "官方记录与所选反馈相符"
+                    OfficialSyncStatus.UNCHANGED -> "暂未同步，可稍后重新核对"
+                    OfficialSyncStatus.CONFLICT -> "官方反馈与所选类型不符"
+                    OfficialSyncStatus.INVALID_WORD -> "官方返回的单词不一致"
+                    OfficialSyncStatus.INCOMPLETE -> "官方数据不完整，尚无法确认"
+                    OfficialSyncStatus.UNCONFIRMED_CHANGE -> "记录有变化，尚无法确认反馈"
+                }
+                addView(gap(8)); addView(label(summary, 13f, accent, true))
+            }
+            if (trialStatus.isNotBlank()) {
+                addView(gap(8)); addView(button("查看反馈详情", false) {
+                    showDetails("反馈详情", trialStatus + "\n\n" + OfficialForegroundActionStore(this@MainActivity).summary())
+                })
+            }
+            if (pending != null || trialBusy) {
+                addView(gap(8)); addView(button("结束本次核对", false) { cancelTrial() })
+            }
+        }
     }
 
-    private fun startTrialForSpelling(snapshot: StudySnapshot, fallback: StudyWord, input: String, mark: LocalMark) {
-        val spelling = input.trim()
-        val chosen = if (spelling.isEmpty()) fallback else snapshot.words.firstOrNull {
-            it.spelling.equals(spelling, ignoreCase = true)
+    private fun pickWord() {
+        if (trialBusy || OfficialTrialStore(this).pending() != null) return
+        val snapshot = store.snapshot()?.takeIf(store::isToday) ?: return
+        val entry = EditText(this).apply {
+            hint = "墨墨正在显示的英文词"; setSingleLine(true)
+            setPadding(dp(20), dp(12), dp(20), dp(12))
         }
-        if (chosen == null) {
-            hint("今日未完成词表找不到这个单词，请先在 MomoFlow 同步，并确认英文拼写")
-            return
-        }
-        startOfficialTrial(chosen, mark)
+        val dialog = AlertDialog.Builder(this).setTitle("切换到墨墨当前词")
+            .setMessage("输入完整拼写，从今日待学词表定位。")
+            .setView(entry).setNegativeButton("取消", null).setPositiveButton("切换", null).create()
+        dialog.setOnShowListener { dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+            val spelling = entry.text.toString().trim()
+            val matches = snapshot.words.withIndex().filter { it.value.spelling.equals(spelling, true) }
+            if (matches.size != 1) {
+                entry.error = if (matches.isEmpty()) "今日待学词表中找不到该词" else "存在同拼写的多个词条，无法唯一定位"
+                return@setOnClickListener
+            }
+            if (!store.isToday(snapshot) || store.snapshot() != snapshot || trialBusy || OfficialTrialStore(this).pending() != null) {
+                entry.error = "词表或反馈状态已变化，请重新打开"; return@setOnClickListener
+            }
+            store.setIndex(matches.single().index); store.setReveal(false)
+            dialog.dismiss(); draw(); LiveWordNotification.publish(this); WordWidget.updateAll(this)
+        } }
+        dialog.show()
     }
 
-    /** Prepare a manual same-word trial, using only documented read-only official API calls. */
+    private fun editToken() {
+        val entry = EditText(this).apply {
+            hint = "粘贴墨墨开放 API Token"; textSize = 14f
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            setSingleLine(true); setPadding(dp(20), dp(16), dp(20), dp(16))
+        }
+        val dialog = AlertDialog.Builder(this).setTitle(if (store.token() == null) "连接墨墨" else "更换 Token")
+            .setMessage("在墨墨「我的 → 更多设置 → 实验功能 → 开放 API」创建 Token，仅加密保存在本机。")
+            .setView(entry).setNegativeButton("取消", null).setPositiveButton("保存", null).create()
+        dialog.setOnShowListener { dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+            val token = entry.text.toString().trim()
+            if (token.isBlank()) { entry.error = "请输入 Token"; return@setOnClickListener }
+            try {
+                requestGeneration++; connectionGeneration++; syncing = false; queryingWordId = null
+                LiveWordNotification.stop(this); store.clearStudyData(); store.saveToken(token)
+                trialStatus = ""; trialBusy = false
+                WordWidget.updateAll(this); message = "连接已保存，请同步今日单词"
+                dialog.dismiss(); page = 0; draw()
+            } catch (_: Exception) { entry.error = "保存失败，请检查设备安全设置" }
+        } }
+        dialog.show()
+    }
+
+    private fun cancelTrial() {
+        requestGeneration++
+        OfficialForegroundActionStore(this).clear()
+        OfficialTrialStore(this).clear()
+        MomoInspectionStore(this).reset()
+        trialBusy = false
+        trialStatus = "本次核对已结束。已发送的墨墨操作无法撤回，官方记录可重新同步。"
+        draw()
+    }
+
+    private fun drawSettings(column: LinearLayout) {
+        section(column) {
+            addView(label("墨墨连接", 16f, ink, true)); addView(gap(8))
+            addView(label(if (store.token() == null) "尚未连接" else "已保存本机授权", 13f, muted))
+            addView(gap(12)); addView(button(if (store.token() == null) "连接墨墨" else "更换 Token", false) { editToken() })
+            if (store.token() != null) {
+                addView(gap(8)); addView(button("清除授权与缓存", false) {
+                    AlertDialog.Builder(this@MainActivity).setTitle("清除本机授权？")
+                        .setMessage("将停止会话并清除本机词表、反馈记录及 Token。")
+                        .setNegativeButton("取消", null).setPositiveButton("清除") { _, _ ->
+                            requestGeneration++; connectionGeneration++; syncing = false; queryingWordId = null
+                            LiveWordNotification.stop(this@MainActivity)
+                            store.forgetToken(); store.clearStudyData(); trialBusy = false; trialStatus = ""; message = ""
+                            WordWidget.updateAll(this@MainActivity); draw()
+                        }.show()
+                })
+            }
+        }
+        section(column) {
+            addView(label("反馈方式", 16f, ink, true)); addView(gap(10))
+            addView(Switch(this@MainActivity).apply {
+                text = "前台自动反馈"; textSize = 15f; minHeight = dp(48)
+                isChecked = store.autoFeedbackEnabled()
+                setOnCheckedChangeListener { _, enabled ->
+                    store.setAutoFeedbackEnabled(enabled)
+                    if (!enabled) OfficialForegroundActionStore(this@MainActivity).clear()
+                    LiveWordNotification.publish(this@MainActivity); draw()
+                }
+            })
+            addView(gap(6)); addView(label("主动点反馈后切换墨墨，仅在同词及按钮识别通过时尝试一次。需启动背词会话。", 12f, muted))
+            addView(gap(10)); addView(label(if (MomoInspectionService.isUserEnabled(this@MainActivity)) "无障碍服务已开启" else "无障碍服务未开启 · 当前使用人工反馈", 12f, muted))
+            addView(gap(10)); addView(button("无障碍服务设置", false) { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) })
+        }
+        section(column) {
+            addView(label("流体云与通知", 16f, ink, true)); addView(gap(10))
+            if (Build.VERSION.SDK_INT >= 36) {
+                addView(Switch(this@MainActivity).apply {
+                    text = "请求在流体云显示"; textSize = 15f; minHeight = dp(48)
+                    isChecked = store.experimentalPromotion()
+                    setOnCheckedChangeListener { _, enabled ->
+                        store.setExperimentalPromotion(enabled); LiveWordNotification.publish(this@MainActivity); draw()
+                    }
+                })
+                addView(gap(6)); addView(label("系统可能仅展示标准通知，三档按钮可在展开通知中操作。", 12f, muted))
+                addView(gap(10)); addView(button("系统实时通知设置", false) { openPromotionSettings() })
+            } else addView(label("当前系统使用标准背词通知。", 13f, muted))
+            addView(gap(8)); addView(button("通知权限设置", false) {
+                startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, packageName))
+            })
+            addView(gap(10)); addView(label("桌面长按空白处，可添加「墨墨流云助手」小组件。", 12f, muted))
+        }
+        section(column) {
+            addView(label("更多", 16f, ink, true)); addView(gap(10))
+            addView(button("本地练习", false) { showLocalPractice() }); addView(gap(8))
+            addView(button("查询当前词的公开释义", false) {
+                val snapshot = store.snapshot()?.takeIf(store::isToday)
+                val word = snapshot?.words?.getOrNull(store.index())
+                if (word == null) hint("请先同步今日单词") else queryMeaning(word)
+            }.apply { isEnabled = queryingWordId == null })
+            addView(gap(8)); addView(button("诊断与反馈详情", false) { showDiagnostics() })
+            addView(gap(8)); addView(button("打开墨墨", false) { openMomo() })
+        }
+        column.addView(label("MomoFlow 0.5.6 · 个人学习助手", 12f, muted))
+    }
+
+    private fun showLocalPractice() {
+        val snapshot = store.snapshot()?.takeIf(store::isToday)
+        val word = snapshot?.words?.getOrNull(store.index())
+        if (word == null) { hint("请先同步今日待学单词"); return }
+        AlertDialog.Builder(this).setTitle("本地练习 · ${word.spelling}")
+            .setMessage("只记录在本机，不计入墨墨进度。")
+            .setPositiveButton("认识") { _, _ -> recordLocal(word, LocalMark.FAMILIAR) }
+            .setNeutralButton("模糊") { _, _ -> recordLocal(word, LocalMark.VAGUE) }
+            .setNegativeButton("忘记") { _, _ -> recordLocal(word, LocalMark.FORGET) }.show()
+    }
+
+    private fun showDiagnostics() {
+        val choices = arrayOf("查看通知状态", "查看官方核对详情", "只读识别当前词（2 分钟）", "复制设备兼容性诊断", "复制官方核对报告", "复制页面识别报告")
+        AlertDialog.Builder(this).setTitle("诊断与反馈详情").setItems(choices) { _, which ->
+            when (which) {
+                0 -> showDetails("通知状态", LiveWordNotification.diagnostics(this))
+                1 -> showDetails("官方核对详情", trialStatus.ifBlank { "暂无反馈核对记录" } + "\n\n" + OfficialForegroundActionStore(this).summary())
+                2 -> {
+                    val snapshot = store.snapshot()?.takeIf(store::isToday)
+                    val word = snapshot?.words?.getOrNull(store.index())
+                    if (word == null) hint("请先同步今日单词") else inspectMomo(word)
+                }
+                3 -> copyDiagnostics()
+                else -> {
+                    val report = if (which == 4) OfficialTrialStore(this).lastReport() else MomoInspectionStore(this).lastReport()
+                    getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("MomoFlow", report))
+                    hint("已复制脱敏报告")
+                }
+            }
+        }.setNegativeButton("关闭", null).show()
+    }
+
+    private fun requestIsCurrent(generation: Int, token: String, day: String): Boolean {
+        if (isDestroyed || isFinishing || generation != requestGeneration || store.token() != token) return false
+        if (day != StudyDay.today()) {
+            trialBusy = false; trialStatus = "学习日期已变化，请重新同步"; draw(); return false
+        }
+        return true
+    }
+
+    /** One explicit app/notification tap prepares one same-word foreground handoff. */
     private fun startOfficialTrial(word: StudyWord, mark: LocalMark, autoAttempt: Boolean = false) {
-        if (trialBusy) return
-        val token = store.token() ?: return hint("请先保存 Token")
+        if (trialBusy || syncing || OfficialTrialStore(this).pending() != null) {
+            hint("请先核对或结束上一次反馈"); return
+        }
+        val token = store.token() ?: return hint("请先连接墨墨")
         val snapshot = store.snapshot()
-        if (snapshot == null || !store.isToday(snapshot) || snapshot.words.none { it.id == word.id }) {
-            return hint("必须选择今日真实待学习单词")
+        if (snapshot == null || !store.isToday(snapshot) || word.isFinished ||
+            snapshot.words.getOrNull(store.index())?.id != word.id ||
+            snapshot.words.count { it.spelling.equals(word.spelling, true) } != 1) {
+            return hint("请同步并选择今日真实待学单词")
         }
         if (packageManager.getLaunchIntentForPackage(MomoInspectionService.MOMO_PACKAGE) == null) {
             return hint("请先安装官方墨墨背单词 App")
         }
+        val day = snapshot.date
+        val generation = ++requestGeneration
         trialBusy = true
         trialStatus = "正在读取 ${word.spelling} 的操作前官方记录。"
-        draw()
+        page = 0; draw()
         Thread {
             try {
                 val client = MaiMemoClient(token)
                 val original = client.record(word.id)
                 val beforeToday = client.todayState(word.id)
-                    ?: throw ApiException("官方今日列表未返回该词；请先在墨墨完成当天初始化并重新同步")
+                    ?: throw ApiException("官方今日列表未返回该词，请重新同步")
+                if (beforeToday.isFinished) throw ApiException("该词已在墨墨完成，请重新同步今日单词")
                 runOnUiThread {
-                    if (token != store.token()) { trialBusy = false; trialStatus = "账号已变化，本次验证取消"; draw(); return@runOnUiThread }
+                    if (!requestIsCurrent(generation, token, day)) return@runOnUiThread
+                    if (store.snapshot()?.words?.getOrNull(store.index())?.id != word.id) {
+                        trialBusy = false; trialStatus = "当前单词已变化，本次反馈取消"; draw(); return@runOnUiThread
+                    }
                     OfficialTrialStore(this).clear()
                     OfficialForegroundActionStore(this).clear()
                     OfficialTrialStore(this).save(OfficialWritebackTrial(
-                        word.id, word.spelling, mark, StudyDay.today(), System.currentTimeMillis(), original, beforeToday
+                        word.id, word.spelling, mark, day, System.currentTimeMillis(), original, beforeToday
                     ))
                     MomoInspectionStore(this).begin(word)
-                    val autoReady = autoAttempt && store.autoFeedbackEnabled() &&
+                    val autoReady = autoAttempt && store.autoFeedbackEnabled() && store.active() &&
                         MomoInspectionService.isUserEnabled(this)
-                    if (autoReady) {
-                        OfficialForegroundActionStore(this).arm(word, mark)
-                    }
+                    if (autoReady) OfficialForegroundActionStore(this).arm(word, mark)
                     trialBusy = false
                     trialStatus = if (autoReady) {
-                        "已保存官方基线，已授权对 ${word.spelling} 进行一次前台${mark.label}操作。仅在墨墨页面同词且三个按钮均唯一可点击时触发；60 秒自动失效。回到本应用将自动读取官方结果。"
+                        "已授权 ${word.spelling} 的一次${mark.label}操作。仅在墨墨同词和三个按钮均唯一可点击时触发，60 秒失效。返回后自动核对官方记录。"
                     } else {
-                        "已保存官方基线。当前未启用前台自动反馈或无障碍服务未开启；请在墨墨原 App 核对同词后手动点${mark.label}，返回再验证官方记录。"
+                        "请在墨墨核对 ${word.spelling} 后手动点${mark.label}，返回后点击「重新核对官方记录」。"
                     }
-                    draw()
-                    openMomo()
+                    draw(); openMomo()
                 }
             } catch (error: Exception) {
                 runOnUiThread {
+                    if (!requestIsCurrent(generation, token, day)) return@runOnUiThread
                     trialBusy = false
-                    trialStatus = "无法获取操作前官方记录：${error.message ?: "接口异常"}。没有开始验证。"
+                    trialStatus = "无法准备本次反馈：${error.message ?: "网络异常"}。未开始操作。"
                     draw()
                 }
             }
@@ -455,27 +564,45 @@ class MainActivity : Activity() {
 
     private fun verifyOfficialTrial() {
         if (trialBusy) return
-        val trial = OfficialTrialStore(this).pending() ?: return hint("没有待验证的操作")
-        val token = store.token() ?: return hint("Token 已失效")
+        val trial = OfficialTrialStore(this).pending() ?: return hint("没有待核对的反馈")
+        val token = store.token() ?: return hint("请先连接墨墨")
+        val generation = requestGeneration
         trialBusy = true; draw()
         Thread {
             try {
                 val client = MaiMemoClient(token)
                 val current = client.record(trial.wordId)
                 val currentToday = client.todayState(trial.wordId)
+                val result = OfficialSyncAssessment.evaluate(
+                    trial.before, current, trial.beforeToday, currentToday, trial.expected
+                )
+                // Never infer a count or remove a word from a dispatched accessibility click.
+                val updated = if (result.status == OfficialSyncStatus.OBSERVED_MATCH) {
+                    StudySnapshot(trial.day, client.progress(), client.unfinished(), System.currentTimeMillis())
+                } else null
                 runOnUiThread {
-                    if (token != store.token()) { trialBusy = false; trialStatus = "账号已变化，不可比较"; draw(); return@runOnUiThread }
+                    if (!requestIsCurrent(generation, token, trial.day) ||
+                        OfficialTrialStore(this).pending() != trial) return@runOnUiThread
                     trialBusy = false
-                    trialStatus = OfficialSyncAssessment.explain(
-                        trial.before, current, trial.beforeToday, currentToday, trial.expected
-                    )
-                    OfficialTrialStore(this).saveReport(trialStatus)
+                    trialStatus = result.message
+                    if (updated != null) {
+                        store.saveSnapshot(updated); store.setReveal(false)
+                        if (updated.words.isEmpty()) store.setActive(false)
+                        OfficialForegroundActionStore(this).clear()
+                        OfficialTrialStore(this).finish(trialStatus, result.status)
+                        MomoInspectionStore(this).reset()
+                        message = "已按墨墨官方返回结果更新今日进度和待学词表"
+                        LiveWordNotification.publish(this); WordWidget.updateAll(this)
+                    } else OfficialTrialStore(this).saveReport(trialStatus, result.status)
                     draw()
                 }
             } catch (error: Exception) {
                 runOnUiThread {
+                    if (!requestIsCurrent(generation, token, trial.day) ||
+                        OfficialTrialStore(this).pending() != trial) return@runOnUiThread
                     trialBusy = false
-                    trialStatus = "验证请求失败：${error.message ?: "网络异常"}。不能认定已回写。"
+                    trialStatus = "核对请求失败：${error.message ?: "网络异常"}。保留本次记录，可稍后重查。"
+                    OfficialTrialStore(this).saveReport(trialStatus)
                     draw()
                 }
             }
@@ -491,6 +618,7 @@ class MainActivity : Activity() {
 
     private fun recordLocal(word: StudyWord, mark: LocalMark) {
         val snapshot = store.snapshot() ?: return
+        if (trialBusy || OfficialTrialStore(this).pending() != null) { hint("请先核对或结束本次反馈"); return }
         if (!store.isToday(snapshot) || snapshot.words.none { it.id == word.id }) return
         LocalFeedbackStore(this).mark(word.id, mark)
         message = "已在本机记录：${word.spelling} · ${mark.label}。墨墨官方进度未改变。"
@@ -498,7 +626,7 @@ class MainActivity : Activity() {
     }
 
     private fun move(delta: Int, size: Int) {
-        if (size <= 0) return
+        if (size <= 0 || trialBusy || OfficialTrialStore(this).pending() != null) return
         store.setIndex((store.index() + delta + size) % size)
         store.setReveal(false)
         draw(); LiveWordNotification.publish(this); WordWidget.updateAll(this)
@@ -507,7 +635,9 @@ class MainActivity : Activity() {
     private fun refresh() {
         val token = store.token()
         if (token == null) { hint("请先保存墨墨开放 API Token"); return }
-        if (syncing) return
+        if (syncing || trialBusy || OfficialTrialStore(this).pending() != null) return
+        val generation = connectionGeneration
+        val day = StudyDay.today()
         syncing = true; message = "正在请求墨墨官方接口"; draw()
         Thread {
             try {
@@ -516,11 +646,13 @@ class MainActivity : Activity() {
                 val items = client.unfinished()
                 // Populate real Chinese meanings from a bundled MIT offline dictionary.
                 // This runs on the sync worker thread, never on the Android UI thread.
-                val offlineCount = OfflineDictionary.prefill(applicationContext, items)
-                val snapshot = StudySnapshot(StudyDay.today(), progress, items, System.currentTimeMillis())
+                val offlineMeanings = OfflineDictionary.lookup(applicationContext, items)
+                val snapshot = StudySnapshot(day, progress, items, System.currentTimeMillis())
                 runOnUiThread {
                     // If the user replaced their token during the request, discard the old account response.
-                    if (store.token() != token) { syncing = false; draw(); return@runOnUiThread }
+                    if (isDestroyed || generation != connectionGeneration || store.token() != token) return@runOnUiThread
+                    if (day != StudyDay.today()) { syncing = false; message = "学习日期已变化，请重新同步"; draw(); return@runOnUiThread }
+                    val offlineCount = store.cacheOfflineMeanings(offlineMeanings)
                     store.saveSnapshot(snapshot)
                     store.setReveal(false)
                     if (items.isEmpty()) store.setActive(false)
@@ -532,6 +664,7 @@ class MainActivity : Activity() {
                 }
             } catch (error: Exception) {
                 runOnUiThread {
+                    if (isDestroyed || generation != connectionGeneration || store.token() != token) return@runOnUiThread
                     syncing = false
                     message = "同步失败：${error.message ?: "网络或数据结构异常"}；未覆盖旧缓存。"
                     draw()
@@ -543,26 +676,33 @@ class MainActivity : Activity() {
     private fun queryMeaning(word: StudyWord) {
         if (queryingWordId != null) return
         val token = store.token() ?: return
+        val generation = connectionGeneration
+        val day = StudyDay.today()
         queryingWordId = word.id
         draw()
         Thread {
             try {
                 val results = MaiMemoClient(token).meanings(word.id)
                 runOnUiThread {
+                    if (isDestroyed || generation != connectionGeneration || token != store.token()) return@runOnUiThread
+                    if (day != StudyDay.today()) { queryingWordId = null; draw(); return@runOnUiThread }
                     if (token == store.token()) {
                         if (results.isNotEmpty()) {
                             store.saveMeaning(word.id, results.joinToString("\n"))
+                            message = "已读取墨墨公开释义"
                         } else {
                             // Official definitions may only be user-created content.
                             // Do not overwrite a valid ECDICT meaning with an empty API result.
                             message = "墨墨未返回用户自建释义，继续使用本地英汉词典"
                         }
                     }
+                    if (token == store.token()) store.markOfficialMeaningCheckedToday(word.id)
                     queryingWordId = null; draw()
                     LiveWordNotification.publish(this)
                 }
             } catch (error: Exception) {
                 runOnUiThread {
+                    if (isDestroyed || generation != connectionGeneration || token != store.token()) return@runOnUiThread
                     queryingWordId = null
                     message = "释义查询失败：${error.message ?: "网络异常"}"
                     draw()
@@ -573,6 +713,7 @@ class MainActivity : Activity() {
 
     private fun toggleSession() {
         if (store.active()) {
+            OfficialForegroundActionStore(this).clear()
             store.setActive(false); LiveWordNotification.stop(this); draw(); return
         }
         val snapshot = store.snapshot()
@@ -581,7 +722,12 @@ class MainActivity : Activity() {
             return
         }
         if (!LiveWordNotification.canPost(this)) {
-            if (Build.VERSION.SDK_INT >= 33) requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 100)
+            if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 100)
+            } else {
+                hint("请在系统设置中开启本应用通知")
+                startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, packageName))
+            }
             return
         }
         store.setActive(true); LiveWordNotification.publish(this); draw()
@@ -615,7 +761,7 @@ class MainActivity : Activity() {
     /** Safe to paste into a support conversation: never reads or prints token, vocabulary or account data. */
     private fun copyDiagnostics() {
         val report = buildString {
-            appendLine("MomoFlow 0.5.5 · 设备诊断（不含账号数据）")
+            appendLine("MomoFlow 0.5.6 · 设备诊断（不含账号数据）")
             appendLine("设备：${Build.MANUFACTURER} ${Build.MODEL}; SDK ${Build.VERSION.SDK_INT}")
             appendLine("通知权限：${if (LiveWordNotification.canPost(this@MainActivity)) "允许" else "未允许"}")
             appendLine(LiveWordNotification.diagnostics(this@MainActivity))

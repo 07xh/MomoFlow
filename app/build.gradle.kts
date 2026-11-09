@@ -6,8 +6,9 @@ android {
         applicationId = "io.github.personal.momoflow"
         minSdk = 26
         targetSdk = 36
-        versionCode = 10
-        versionName = "0.5.5"
+        testInstrumentationRunner = "io.github.personal.momoflow.UiSmokeRunner"
+        versionCode = 11
+        versionName = "0.5.6"
     }
     testOptions { unitTests.isReturnDefaultValues = true }
     buildTypes {

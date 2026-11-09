@@ -37,21 +37,12 @@ object OfflineDictionary {
     }
 
     /** Call from a worker thread, never from notification/UI main thread. */
-    fun prefill(context: Context, words: List<StudyWord>): Int {
-        if (words.isEmpty()) return 0
-        val database = openDatabase(context) ?: return 0
-        val prefs = context.getSharedPreferences("momoflow_local", Context.MODE_PRIVATE)
-        val editor = prefs.edit()
-        var inserted = 0
+    fun lookup(context: Context, words: List<StudyWord>): Map<String, String> {
+        if (words.isEmpty()) return emptyMap()
+        val database = openDatabase(context) ?: return emptyMap()
+        val result = mutableMapOf<String, String>()
         try {
             for (word in words) {
-                val cached = prefs.getString("meaning.${word.id}", null)?.trim().orEmpty()
-                // Repair a placeholder saved by older builds when official meanings were empty.
-                if (cached.isNotEmpty() &&
-                    cached != "墨墨未返回公开释义" &&
-                    cached != "墨墨未返回用户自建释义" &&
-                    cached != "暂无可用释义"
-                ) continue
                 database.query(
                     "lexicon", arrayOf("translation", "phonetic"),
                     "word = ? COLLATE NOCASE", arrayOf(word.spelling.trim()),
@@ -62,17 +53,15 @@ object OfflineDictionary {
                     if (meaning.isNotBlank()) {
                         val phonetic = cursor.getString(1)?.trim().orEmpty()
                         val display = if (phonetic.isBlank()) meaning else "[$phonetic] $meaning"
-                        editor.putString("meaning.${word.id}", display)
-                        inserted++
+                        result[word.id] = display
                     }
                 }
             }
-            editor.apply()
         } catch (_: Exception) {
             // A missing or broken optional dictionary must never destroy official study data.
         } finally {
             database.close()
         }
-        return inserted
+        return result
     }
 }
