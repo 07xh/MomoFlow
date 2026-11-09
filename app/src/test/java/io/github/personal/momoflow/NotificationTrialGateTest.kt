@@ -39,4 +39,13 @@ class NotificationTrialGateTest {
         val ambiguous = snapshot.copy(words = listOf(first, duplicate, second))
         assertNull(NotificationTrialGate.select(ambiguous, true, true, 0, "id-1", "FAMILIAR"))
     }
+    @Test fun rejectsAlreadyCompletedWord() {
+        val finished = snapshot.copy(words = listOf(first.copy(isFinished = true)))
+        assertNull(NotificationTrialGate.select(finished, true, true, 0, "id-1", "FAMILIAR"))
+    }
+
+    @Test fun rejectsEmptyOfficialSpelling() {
+        val malformed = snapshot.copy(words = listOf(first.copy(spelling = " ")))
+        assertNull(NotificationTrialGate.select(malformed, true, true, 0, "id-1", "FORGET"))
+    }
 }
