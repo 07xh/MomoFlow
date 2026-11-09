@@ -47,7 +47,7 @@ class OfficialTrialStore(context: Context) {
     } catch (_: Exception) { null }
 
     fun saveReport(report: String) {
-        prefs.edit().putString("official_trial_report", report.take(500)).apply()
+        prefs.edit().putString("official_trial_report", report.take(1200)).apply()
     }
 
     fun lastReport(): String = prefs.getString("official_trial_report", "") ?: ""
