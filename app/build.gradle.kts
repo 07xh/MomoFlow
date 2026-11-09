@@ -6,8 +6,8 @@ android {
         applicationId = "io.github.personal.momoflow"
         minSdk = 26
         targetSdk = 36
-        versionCode = 6
-        versionName = "0.5.1"
+        versionCode = 7
+        versionName = "0.5.2"
     }
     testOptions { unitTests.isReturnDefaultValues = true }
     buildTypes {
