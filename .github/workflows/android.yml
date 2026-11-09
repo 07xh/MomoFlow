@@ -58,7 +58,7 @@ jobs:
         if: steps.apk.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
-          name: MomoFlow-v0.5.0-debug-apk
+          name: MomoFlow-v0.5.1-debug-apk
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
 
@@ -69,6 +69,15 @@ jobs:
         run: |
           set -o pipefail
           gradle --no-daemon --console=plain :app:testDebugUnitTest --stacktrace 2>&1 | tee tests.log
+
+      - name: Confirm verified build in CI issue
+        if: success() && contains(github.event.head_commit.message, '[verify]')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          gh issue comment 1 --body "✅ MomoFlow 0.5.1 APK 构建与单元测试成功。Commit: ${GITHUB_SHA}. 运行记录: https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
 
       - name: Summarize failure
         if: failure()
