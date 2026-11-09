@@ -40,7 +40,7 @@ class MaiMemoClient(private val token: String) {
         }
     }
 
-    fun progress(): StudyProgress = StudyProgress.parse(request("POST", "/study/get_study_progress").getJSONObject("progress"))
+    fun progress(): StudyProgress = StudyProgress.parse(request("POST", "/study/get_study_progress", JSONObject()).getJSONObject("progress"))
 
     fun unfinished(): List<StudyWord> {
         val payload = JSONObject().put("is_finished", false).put("limit", 1000)

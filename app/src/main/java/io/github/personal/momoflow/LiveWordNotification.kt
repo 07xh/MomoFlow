@@ -34,8 +34,8 @@ object LiveWordNotification {
     }
 
 
-    fun canPost(context: Context): Boolean = Build.VERSION.SDK_INT < 33 ||
-        context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+    fun canPost(context: Context): Boolean = manager(context).areNotificationsEnabled() &&
+        (Build.VERSION.SDK_INT < 33 || context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED)
 
     fun stop(context: Context) { manager(context).cancel(NOTIFICATION_ID) }
 

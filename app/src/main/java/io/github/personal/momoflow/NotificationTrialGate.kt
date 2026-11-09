@@ -15,7 +15,7 @@ object NotificationTrialGate {
     ): NotificationTrialSelection? {
         if (!isToday || !active || snapshot == null) return null
         val current = snapshot.words.getOrNull(index) ?: return null
-        if (current.id.isBlank() || current.id != wordId) return null
+        if (current.id.isBlank() || current.spelling.isBlank() || current.isFinished || current.id != wordId) return null
         // The official UI exposes a spelling, not a voc_id. Never auto-act
         // if today's cache contains two senses with the same spelling.
         if (snapshot.words.count { it.spelling.equals(current.spelling, ignoreCase = true) } != 1) return null

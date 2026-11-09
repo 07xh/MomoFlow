@@ -56,11 +56,21 @@ jobs:
           set -o pipefail
           gradle --no-daemon --console=plain :app:assembleDebug --stacktrace 2>&1 | tee apk-build.log
 
+      - name: Build UI smoke instrumentation
+        run: gradle --no-daemon --console=plain :app:assembleDebugAndroidTest
+
+      - name: Upload UI smoke instrumentation
+        uses: actions/upload-artifact@v4
+        with:
+          name: MomoFlow-ui-smoke-apk
+          path: app/build/outputs/apk/androidTest/debug/*.apk
+          if-no-files-found: error
+
       - name: Upload APK
         if: steps.apk.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
-          name: MomoFlow-v0.5.5-debug-apk
+          name: MomoFlow-v0.5.6-debug-apk
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
 
@@ -79,7 +89,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
         shell: bash
         run: |
-          gh issue comment 1 --body "✅ MomoFlow 0.5.5 APK 构建与单元测试成功。Commit: ${GITHUB_SHA}. 运行记录: https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          gh issue comment 1 --body "✅ MomoFlow 0.5.6 APK 构建与单元测试成功。Commit: ${GITHUB_SHA}. 运行记录: https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
 
       - name: Summarize failure
         if: failure()
@@ -145,3 +155,50 @@ jobs:
             tests.log
             app/build/test-results/testDebugUnitTest/**
           if-no-files-found: warn
+
+  ui-smoke:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: actions/download-artifact@v4
+        with:
+          name: MomoFlow-v0.5.6-debug-apk
+          path: smoke-app
+      - uses: actions/download-artifact@v4
+        with:
+          name: MomoFlow-ui-smoke-apk
+          path: smoke-test
+      - name: Enable KVM
+        run: sudo chmod 666 /dev/kvm
+      - name: Run Android 16 UI smoke
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 36
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          script: |
+            adb install smoke-app/app-debug.apk
+            adb install smoke-test/app-debug-androidTest.apk
+            adb shell am instrument -w io.github.personal.momoflow.test/io.github.personal.momoflow.UiSmokeRunner | tee ui-smoke.log
+            grep -q 'uiSmoke=PASS' ui-smoke.log
+            adb pull /sdcard/Android/data/io.github.personal.momoflow/files/ui-smoke ui-smoke
+            adb shell settings put system font_scale 1.3
+            adb shell am force-stop io.github.personal.momoflow
+            adb shell am instrument -w io.github.personal.momoflow.test/io.github.personal.momoflow.UiSmokeRunner | tee ui-smoke-large.log
+            grep -q 'uiSmoke=PASS' ui-smoke-large.log
+            adb pull /sdcard/Android/data/io.github.personal.momoflow/files/ui-smoke ui-smoke-large
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: MomoFlow-ui-smoke-screenshots
+          path: |
+            ui-smoke*/**
+            ui-smoke*.log

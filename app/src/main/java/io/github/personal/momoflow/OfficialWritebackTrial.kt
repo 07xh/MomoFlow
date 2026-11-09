@@ -46,11 +46,21 @@ class OfficialTrialStore(context: Context) {
         }
     } catch (_: Exception) { null }
 
-    fun saveReport(report: String) {
-        prefs.edit().putString("official_trial_report", report.take(1200)).apply()
+    fun saveReport(report: String, status: OfficialSyncStatus? = null) {
+        prefs.edit().putString("official_trial_report", report.take(1200))
+            .putString("official_trial_status", status?.name).apply()
+    }
+
+    fun lastStatus(): OfficialSyncStatus? = prefs.getString("official_trial_status", null)?.let {
+        runCatching { OfficialSyncStatus.valueOf(it) }.getOrNull()
+    }
+
+    fun finish(report: String, status: OfficialSyncStatus) {
+        prefs.edit().remove("official_trial").putString("official_trial_report", report.take(1200))
+            .putString("official_trial_status", status.name).apply()
     }
 
     fun lastReport(): String = prefs.getString("official_trial_report", "") ?: ""
 
-    fun clear() { prefs.edit().remove("official_trial").remove("official_trial_report").apply() }
+    fun clear() { prefs.edit().remove("official_trial").remove("official_trial_report").remove("official_trial_status").apply() }
 }
