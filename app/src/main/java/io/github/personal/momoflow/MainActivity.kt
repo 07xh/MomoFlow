@@ -220,12 +220,24 @@ class MainActivity : Activity() {
         if (snapshot != null && snapshot.words.isNotEmpty()) {
             val word = snapshot.words[store.index().coerceIn(0, snapshot.words.lastIndex)]
             trialPane.addView(gap(12))
-            trialPane.addView(label("选择要在墨墨原 App 中验证的反馈：${word.spelling}", 13f, ink, true))
+            trialPane.addView(label("验证墨墨真实反馈 · 当前默认词：${word.spelling}", 13f, ink, true))
+            trialPane.addView(gap(6))
+            trialPane.addView(label("可输入墨墨原 App 当前显示的英文词（必须在今日待学词表中）。留空则使用默认词，提交前仍需核对完全一致。", 11f, muted))
+            trialPane.addView(gap(7))
+            val trialSpelling = EditText(this).apply {
+                hint = "墨墨当前单词（英文）"
+                setSingleLine(true)
+                inputType = InputType.TYPE_CLASS_TEXT
+                textSize = 14f
+                background = rounded(Color.parseColor("#F1F6FF"), 12, Color.parseColor("#D8E6F7"))
+                setPadding(dp(12), dp(8), dp(12), dp(8))
+            }
+            trialPane.addView(trialSpelling, LinearLayout.LayoutParams(-1, dp(49)))
             trialPane.addView(gap(8))
             trialPane.addView(horizontal(
-                button("认识 · 验证", false) { startOfficialTrial(word, LocalMark.FAMILIAR) },
-                button("模糊 · 验证", false) { startOfficialTrial(word, LocalMark.VAGUE) },
-                button("忘记 · 验证", false) { startOfficialTrial(word, LocalMark.FORGET) }
+                button("认识 · 验证", false) { startTrialForSpelling(snapshot, word, trialSpelling.text.toString(), LocalMark.FAMILIAR) },
+                button("模糊 · 验证", false) { startTrialForSpelling(snapshot, word, trialSpelling.text.toString(), LocalMark.VAGUE) },
+                button("忘记 · 验证", false) { startTrialForSpelling(snapshot, word, trialSpelling.text.toString(), LocalMark.FORGET) }
             ))
             trialPane.addView(gap(10))
             trialPane.addView(button("只读识别墨墨背词页面控件（2 分钟）", false) { inspectMomo(word) })
@@ -302,6 +314,18 @@ class MainActivity : Activity() {
         column.addView(label("开放 API 只读；可选无障碍服务只读取墨墨背词页指定控件，默认不启用，不会自动点击。无需 Root。", 11f, muted))
     }
 
+    private fun startTrialForSpelling(snapshot: StudySnapshot, fallback: StudyWord, input: String, mark: LocalMark) {
+        val spelling = input.trim()
+        val chosen = if (spelling.isEmpty()) fallback else snapshot.words.firstOrNull {
+            it.spelling.equals(spelling, ignoreCase = true)
+        }
+        if (chosen == null) {
+            hint("今日未完成词表找不到这个单词，请先在 MomoFlow 同步，并确认英文拼写")
+            return
+        }
+        startOfficialTrial(chosen, mark)
+    }
+
     /** Prepare a manual same-word trial, using only documented read-only official API calls. */
     private fun startOfficialTrial(word: StudyWord, mark: LocalMark) {
         if (trialBusy) return
@@ -318,12 +342,15 @@ class MainActivity : Activity() {
         draw()
         Thread {
             try {
-                val original = MaiMemoClient(token).record(word.id)
+                val client = MaiMemoClient(token)
+                val original = client.record(word.id)
+                val beforeToday = client.todayState(word.id)
+                    ?: throw ApiException("官方今日列表未返回该词；请先在墨墨完成当天初始化并重新同步")
                 runOnUiThread {
                     if (token != store.token()) { trialBusy = false; trialStatus = "账号已变化，本次验证取消"; draw(); return@runOnUiThread }
                     OfficialTrialStore(this).clear()
                     OfficialTrialStore(this).save(OfficialWritebackTrial(
-                        word.id, word.spelling, mark, StudyDay.today(), System.currentTimeMillis(), original
+                        word.id, word.spelling, mark, StudyDay.today(), System.currentTimeMillis(), original, beforeToday
                     ))
                     // The optional accessibility service is read-only and only scans
                     // the official app for 2 minutes; no service/permission is auto-enabled.
@@ -350,11 +377,15 @@ class MainActivity : Activity() {
         trialBusy = true; draw()
         Thread {
             try {
-                val current = MaiMemoClient(token).record(trial.wordId)
+                val client = MaiMemoClient(token)
+                val current = client.record(trial.wordId)
+                val currentToday = client.todayState(trial.wordId)
                 runOnUiThread {
                     if (token != store.token()) { trialBusy = false; trialStatus = "账号已变化，不可比较"; draw(); return@runOnUiThread }
                     trialBusy = false
-                    trialStatus = OfficialRecordComparison.explain(trial.before, current, trial.expected)
+                    trialStatus = OfficialSyncAssessment.explain(
+                        trial.before, current, trial.beforeToday, currentToday, trial.expected
+                    )
                     OfficialTrialStore(this).saveReport(trialStatus)
                     draw()
                 }
