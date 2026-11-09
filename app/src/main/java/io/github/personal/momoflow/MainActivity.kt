@@ -281,6 +281,12 @@ class MainActivity : Activity() {
             })
             toolsPane.addView(gap(5))
             toolsPane.addView(label("关闭时仅发送标准通知。开启也不保证 ColorOS 展示为流体云；仅适合用户主动开始的学习会话。", 11f, muted))
+            toolsPane.addView(gap(8))
+            toolsPane.addView(button("检查系统实时通知 / 流体云开关", false) {
+                openPromotionSettings()
+            })
+            toolsPane.addView(gap(5))
+            toolsPane.addView(label("部分一加系统还需要单独开启「在流体云显示实时通知」。如系统没有该入口，将打开本应用的通知设置。", 11f, muted))
         }
         toolsPane.addView(gap(10))
         toolsPane.addView(horizontal(
@@ -471,6 +477,25 @@ class MainActivity : Activity() {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == 100 && grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) toggleSession()
         else if (requestCode == 100) hint("未授予通知权限，背词会话不会启动")
+    }
+
+    private fun openPromotionSettings() {
+        if (Build.VERSION.SDK_INT < 36) {
+            hint("此功能需要 Android 16")
+            return
+        }
+        val promotion = Intent(Settings.ACTION_APP_NOTIFICATION_PROMOTION_SETTINGS)
+            .putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+        try {
+            startActivity(promotion)
+        } catch (_: Exception) {
+            try {
+                startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                    .putExtra(Settings.EXTRA_APP_PACKAGE, packageName))
+            } catch (_: Exception) {
+                hint("系统未提供可打开的通知设置入口，可从设置中搜索「流体云」或「实时通知」")
+            }
+        }
     }
 
     /** Safe to paste into a support conversation: never reads or prints token, vocabulary or account data. */
