@@ -23,13 +23,15 @@ assert 'android.requestPromotedOngoing' in notifier
 assert 'activeNotifications' in notifier
 assert 'officialTrialAction(' in notifier
 assert 'PendingIntent.getActivity' in notifier
-assert all(x in notifier for x in ('认识·验证', '模糊·验证', '忘记·验证'))
+assert 'officialTrialAction(context, word.id, LocalMark.FAMILIAR' in notifier
+assert 'officialTrialAction(context, word.id, LocalMark.VAGUE' in notifier
+assert 'officialTrialAction(context, word.id, LocalMark.FORGET' in notifier
 assert 'WordActionReceiver' not in notifier
 guard = (src / 'NotificationTrialGate.kt').read_text()
 assert 'current.id != wordId' in guard and '!active' in guard and '!isToday' in guard
 activity = (src / 'MainActivity.kt').read_text()
 assert 'handleNotificationTrial(intent)' in activity
-assert 'startOfficialTrial(selected.word, selected.expected)' in activity
+assert 'startOfficialTrial(selected.word, selected.expected, autoAttempt = store.autoFeedbackEnabled())' in activity
 store = (src / 'LocalFeedbackStore.kt').read_text()
 assert 'SharedPreferences' not in store or 'getSharedPreferences' in store
 assert '.mark' not in client, 'The official API client must remain read-only'
@@ -41,9 +43,15 @@ inspector = (src / 'MomoInspection.kt').read_text()
 assert 'OfficialTrialStore' in trial and 'before:' in trial
 assert 'OfficialRecordComparison' in record
 # Inspecting an advertised ACTION_CLICK capability is read-only; invoking it is not.
-assert 'performAction(' not in inspector
+assert 'button.performAction(AccessibilityNodeInfo.ACTION_CLICK)' in inspector
+assert 'actionStore.claim(pending.nonce)' in inspector
+assert 'second.isEligible(pending.mark.label)' in inspector
 assert 'dispatchGesture(' not in inspector
 assert 'performGlobalAction(' not in inspector
+auto = (src / 'OfficialForegroundAction.kt').read_text()
+assert '60_000L' in auto and 'auto_feedback.pending' in auto
+assert 'trial.wordId != action.wordId' in auto
+assert 'setAutoFeedbackEnabled' in (src / 'SecureStore.kt').read_text()
 assert 'rootInActiveWindow' in inspector
 assert 'com.maimemo.android.momo' in inspector
 assert 'query_study_records' in client
@@ -53,4 +61,4 @@ print('STATIC CHECK PASS: XML, read-only API, official comparison, scoped read-o
 assert 'saveReport' in (src / 'OfficialWritebackTrial.kt').read_text()
 assert '复制设备兼容性诊断' in (src / 'MainActivity.kt').read_text()
 assert '.setData(Uri.parse("momoflow://official-trial/' in notifier
-print('V0.5.4 CHECK PASS: 3 same-word official manual trial actions, no private writeback')
+print('V0.5.5 CHECK PASS: one-shot guarded foreground click, user opt-in, official readback')

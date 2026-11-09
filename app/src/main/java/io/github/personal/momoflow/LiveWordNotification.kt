@@ -45,6 +45,8 @@ object LiveWordNotification {
         if (!store.active() || !store.isToday(snap) || snap.words.isEmpty()) return stop(context)
         if (!canPost(context)) return
         val word = snap.words[store.index().coerceIn(0, snap.words.lastIndex)]
+        val foreground = store.autoFeedbackEnabled() && MomoInspectionService.isUserEnabled(context)
+        val actionSuffix = if (foreground) "" else "·验证"
         val shownMeaning = if (store.reveal()) store.cachedMeaning(word.id) ?: "暂无离线释义，请在助手内重新同步" else "轻触应用查看释义"
         manager(context).createNotificationChannel(NotificationChannel(CHANNEL, "正在背词", NotificationManager.IMPORTANCE_DEFAULT).apply {
             description = "由用户主动开启的背词会话"
@@ -56,19 +58,20 @@ object LiveWordNotification {
             .setSmallIcon(android.R.drawable.ic_menu_info_details)
             .setContentTitle(word.spelling)
             .setContentText(shownMeaning)
-            .setSubText("墨墨 · ${snap.progress.finished}/${snap.progress.total} · 点选后需在官方 App 手动反馈")
+            .setSubText(if (foreground) "墨墨前台同词单次操作 · 待官方回读" else "墨墨 · 今日 ${snap.progress.finished}/${snap.progress.total} · 人工验证")
             .setContentIntent(open)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setShowWhen(false)
             .setCategory(Notification.CATEGORY_SERVICE)
-            // All three actions initiate a manual same-word official App verification.
-            // None sends a private write request or updates the user's official progress.
-            .addAction(Notification.Action.Builder(null, "认识·验证",
+            // Each button starts an explicit user-requested same-word foreground handoff.
+            // If separately opted in, the official app receives ONE accessibility ACTION_CLICK.
+            // No private HTTP write and no optimistic mutation of official progress.
+            .addAction(Notification.Action.Builder(null, "认识${actionSuffix}",
                 officialTrialAction(context, word.id, LocalMark.FAMILIAR, 11)).build())
-            .addAction(Notification.Action.Builder(null, "模糊·验证",
+            .addAction(Notification.Action.Builder(null, "模糊${actionSuffix}",
                 officialTrialAction(context, word.id, LocalMark.VAGUE, 12)).build())
-            .addAction(Notification.Action.Builder(null, "忘记·验证",
+            .addAction(Notification.Action.Builder(null, "忘记${actionSuffix}",
                 officialTrialAction(context, word.id, LocalMark.FORGET, 13)).build())
         if (Build.VERSION.SDK_INT >= 36 && store.experimentalPromotion()) {
             builder.setShortCriticalText(word.spelling.take(7))

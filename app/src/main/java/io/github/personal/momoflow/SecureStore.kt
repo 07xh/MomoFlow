@@ -66,15 +66,23 @@ class SecureStore(context: Context) {
     fun setReveal(value: Boolean) { prefs.edit().putBoolean("reveal", value).apply() }
     fun experimentalPromotion(): Boolean = prefs.getBoolean("experimental_promotion", false)
     fun setExperimentalPromotion(enabled: Boolean) { prefs.edit().putBoolean("experimental_promotion", enabled).apply() }
+    /** Explicit opt-in. Accessibility stays read-only unless a notification tap arms a request. */
+    fun autoFeedbackEnabled(): Boolean = prefs.getBoolean("auto_feedback_enabled", false)
+    fun setAutoFeedbackEnabled(enabled: Boolean) {
+        val edit = prefs.edit().putBoolean("auto_feedback_enabled", enabled)
+        if (!enabled) edit.remove("auto_feedback.pending")
+        edit.apply()
+    }
     fun active(): Boolean = prefs.getBoolean("session_active", false)
     fun setActive(value: Boolean) { prefs.edit().putBoolean("session_active", value).apply() }
     fun cachedMeaning(vocId: String): String? = prefs.getString("meaning.$vocId", null)
     fun saveMeaning(vocId: String, meaning: String) { prefs.edit().putString("meaning.$vocId", meaning).apply() }
     fun clearStudyData() {
         val editor = prefs.edit()
-        prefs.all.keys.filter { it.startsWith("meaning.") || it.startsWith("feedback.") }.forEach { editor.remove(it) }
+        prefs.all.keys.filter { it.startsWith("meaning.") || it.startsWith("feedback.") || it.startsWith("auto_feedback.") }.forEach { editor.remove(it) }
         editor.remove("official_trial").remove("official_trial_report").remove("momo_inspect.word")
             .remove("momo_inspect.until").remove("momo_inspect.report")
-            .remove("snapshot").remove("index").putBoolean("reveal", false).putBoolean("session_active", false).apply()
+            .remove("snapshot").remove("index").putBoolean("auto_feedback_enabled", false)
+            .putBoolean("reveal", false).putBoolean("session_active", false).apply()
     }
 }
