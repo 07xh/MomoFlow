@@ -84,12 +84,18 @@ class MainActivity : Activity() {
             hint("正在读取上一次验证的基线，请勿重复点击")
             return
         }
-        startOfficialTrial(selected.word, selected.expected)
+        startOfficialTrial(selected.word, selected.expected, autoAttempt = store.autoFeedbackEnabled())
     }
 
     override fun onResume() {
         super.onResume()
         draw()
+        // The user returned from MaiMemo after a one-shot foreground click.
+        // Readback remains subject to official sync delay and can be retried manually.
+        if (OfficialTrialStore(this).pending() != null &&
+            OfficialForegroundActionStore(this).takeReadback()) {
+            verifyOfficialTrial()
+        }
     }
 
     private fun dp(v: Int) = (resources.displayMetrics.density * v).toInt()
@@ -320,7 +326,9 @@ class MainActivity : Activity() {
             })
         }
         trialPane.addView(gap(8))
-        trialPane.addView(label("只读识别结果：${MomoInspectionStore(this).lastReport()}", 11f, muted))
+        trialPane.addView(label("前台回写尝试：${OfficialForegroundActionStore(this).summary()}", 11f, muted))
+        trialPane.addView(gap(5))
+        trialPane.addView(label("只读页面识别：${MomoInspectionStore(this).lastReport()}", 11f, muted))
         trialPane.addView(gap(8))
         trialPane.addView(button("复制只读识别报告（不含单词或 Token）", false) {
             val safeReport = MomoInspectionStore(this).lastReport()
@@ -335,7 +343,20 @@ class MainActivity : Activity() {
         val toolsPane = pane()
         toolsPane.addView(label("流体云与快捷入口", 16f, ink, true))
         toolsPane.addView(gap(6))
-        toolsPane.addView(label("通知中的认识 / 模糊 / 忘记会开启“官方同词验证”并跳转墨墨；仍需在官方 App 手动点击。当前不会后台自动写回。", 11f, muted))
+        toolsPane.addView(label("通知三档按钮可选启用“墨墨前台单次反馈”。这是由墨墨自身处理的前台操作，并非未公开接口或纯后台写入；官方完成情况以回读为准。", 11f, muted))
+        toolsPane.addView(gap(8))
+        toolsPane.addView(button(if (store.autoFeedbackEnabled()) "关闭前台自动反馈" else "开启前台自动反馈（主动授权）", false) {
+            val enable = !store.autoFeedbackEnabled()
+            store.setAutoFeedbackEnabled(enable)
+            if (!enable) OfficialForegroundActionStore(this).clear()
+            LiveWordNotification.publish(this)
+            draw()
+            if (enable && !MomoInspectionService.isUserEnabled(this)) {
+                hint("请在系统无障碍设置中手动开启“墨墨页面诊断与单次反馈”，否则仅使用原有人工验证。")
+            }
+        })
+        toolsPane.addView(gap(5))
+        toolsPane.addView(label("默认关闭。需另外在系统无障碍设置里开启服务；只有你主动点通知按钮才会为当前单词授权一次操作，60 秒过期，错词绝不执行。", 11f, muted))
         toolsPane.addView(gap(8))
         toolsPane.addView(label(LiveWordNotification.diagnostics(this), 12f, muted))
         if (Build.VERSION.SDK_INT >= 36) {
@@ -365,7 +386,7 @@ class MainActivity : Activity() {
         toolsPane.addView(button("复制设备兼容性诊断（不含 Token）", false) { copyDiagnostics() })
         column.addView(toolsPane)
         column.addView(gap(16))
-        column.addView(label("开放 API 只读；可选无障碍服务只读取墨墨背词页指定控件，默认不启用，不会自动点击。无需 Root。", 11f, muted))
+        column.addView(label("开放 API 用于读取与回验；可选无障碍服务在明确授权的前台同词场景只尝试点击一次，不改变其他 App、不读取账号资料。无需 Root。", 11f, muted))
     }
 
     private fun startTrialForSpelling(snapshot: StudySnapshot, fallback: StudyWord, input: String, mark: LocalMark) {
@@ -381,7 +402,7 @@ class MainActivity : Activity() {
     }
 
     /** Prepare a manual same-word trial, using only documented read-only official API calls. */
-    private fun startOfficialTrial(word: StudyWord, mark: LocalMark) {
+    private fun startOfficialTrial(word: StudyWord, mark: LocalMark, autoAttempt: Boolean = false) {
         if (trialBusy) return
         val token = store.token() ?: return hint("请先保存 Token")
         val snapshot = store.snapshot()
@@ -403,14 +424,22 @@ class MainActivity : Activity() {
                 runOnUiThread {
                     if (token != store.token()) { trialBusy = false; trialStatus = "账号已变化，本次验证取消"; draw(); return@runOnUiThread }
                     OfficialTrialStore(this).clear()
+                    OfficialForegroundActionStore(this).clear()
                     OfficialTrialStore(this).save(OfficialWritebackTrial(
                         word.id, word.spelling, mark, StudyDay.today(), System.currentTimeMillis(), original, beforeToday
                     ))
-                    // The optional accessibility service is read-only and only scans
-                    // the official app for 2 minutes; no service/permission is auto-enabled.
                     MomoInspectionStore(this).begin(word)
+                    val autoReady = autoAttempt && store.autoFeedbackEnabled() &&
+                        MomoInspectionService.isUserEnabled(this)
+                    if (autoReady) {
+                        OfficialForegroundActionStore(this).arm(word, mark)
+                    }
                     trialBusy = false
-                    trialStatus = "官方学习记录基线已保存；已准备 2 分钟只读控件识别（需事先手动开启无障碍服务）。请先核对墨墨当前单词是否为 ${word.spelling}，相同才手动点${mark.label}；不同则不要提交。返回后检查同屏识别结果，再验证官方记录。"
+                    trialStatus = if (autoReady) {
+                        "已保存官方基线，已授权对 ${word.spelling} 进行一次前台${mark.label}操作。仅在墨墨页面同词且三个按钮均唯一可点击时触发；60 秒自动失效。回到本应用将自动读取官方结果。"
+                    } else {
+                        "已保存官方基线。当前未启用前台自动反馈或无障碍服务未开启；请在墨墨原 App 核对同词后手动点${mark.label}，返回再验证官方记录。"
+                    }
                     draw()
                     openMomo()
                 }
@@ -586,7 +615,7 @@ class MainActivity : Activity() {
     /** Safe to paste into a support conversation: never reads or prints token, vocabulary or account data. */
     private fun copyDiagnostics() {
         val report = buildString {
-            appendLine("MomoFlow 0.5.4 · 设备诊断（不含账号数据）")
+            appendLine("MomoFlow 0.5.5 · 设备诊断（不含账号数据）")
             appendLine("设备：${Build.MANUFACTURER} ${Build.MODEL}; SDK ${Build.VERSION.SDK_INT}")
             appendLine("通知权限：${if (LiveWordNotification.canPost(this@MainActivity)) "允许" else "未允许"}")
             appendLine(LiveWordNotification.diagnostics(this@MainActivity))
