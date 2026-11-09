@@ -18,6 +18,7 @@ import android.provider.Settings
 import android.text.InputType
 import android.view.Gravity
 import android.view.View
+import android.view.WindowInsetsController
 import android.view.WindowInsets
 import android.widget.Button
 import android.widget.FrameLayout
@@ -152,6 +153,7 @@ class MainActivity : Activity() {
         setTextColor(if (filled) Color.WHITE else accent)
         background = rounded(if (filled) accent else Color.parseColor("#EDF4F1"), 14)
         backgroundTintList = null
+        stateListAnimator = null; elevation = 0f; translationZ = 0f
         minHeight = dp(48); minimumHeight = dp(48)
         minWidth = 0; minimumWidth = 0
         setPadding(dp(10), dp(12), dp(10), dp(12))
@@ -206,6 +208,10 @@ class MainActivity : Activity() {
         }
         scroller.addView(column)
         setContentView(frame); frame.requestApplyInsets()
+        if (Build.VERSION.SDK_INT >= 30) {
+            val appearance = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
+            window.insetsController?.setSystemBarsAppearance(appearance, appearance)
+        }
         column.addView(label("墨墨流云", 28f, ink, true))
         column.addView(gap(4))
         column.addView(label(if (page == 0) "把注意力留给眼前这个词" else "连接与使用偏好", 13f, muted))
