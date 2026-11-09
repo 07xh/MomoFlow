@@ -69,10 +69,20 @@ class SecureStore(context: Context) {
     fun active(): Boolean = prefs.getBoolean("session_active", false)
     fun setActive(value: Boolean) { prefs.edit().putBoolean("session_active", value).apply() }
     fun cachedMeaning(vocId: String): String? = prefs.getString("meaning.$vocId", null)
-    fun saveMeaning(vocId: String, meaning: String) { prefs.edit().putString("meaning.$vocId", meaning).apply() }
+    fun meaningSource(vocId: String): String? = prefs.getString("meaning_source.$vocId", null)
+    // A failed official lookup is never marked as checked, so it remains retryable.
+    fun officialMeaningCheckedToday(vocId: String): Boolean =
+        prefs.getString("meaning_checked.$vocId", null) == StudyDay.today()
+    fun markOfficialMeaningCheckedToday(vocId: String) {
+        prefs.edit().putString("meaning_checked.$vocId", StudyDay.today()).apply()
+    }
+    fun saveMeaning(vocId: String, meaning: String) {
+        prefs.edit().putString("meaning.$vocId", meaning)
+            .putString("meaning_source.$vocId", "official").apply()
+    }
     fun clearStudyData() {
         val editor = prefs.edit()
-        prefs.all.keys.filter { it.startsWith("meaning.") || it.startsWith("feedback.") }.forEach { editor.remove(it) }
+        prefs.all.keys.filter { it.startsWith("meaning.") || it.startsWith("meaning_source.") || it.startsWith("meaning_checked.") || it.startsWith("feedback.") }.forEach { editor.remove(it) }
         editor.remove("official_trial").remove("official_trial_report").remove("momo_inspect.word")
             .remove("momo_inspect.until").remove("momo_inspect.report")
             .remove("snapshot").remove("index").putBoolean("reveal", false).putBoolean("session_active", false).apply()
