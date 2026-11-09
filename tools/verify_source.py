@@ -52,5 +52,5 @@ print('STATIC CHECK PASS: XML, read-only API, official comparison, scoped read-o
 
 assert 'saveReport' in (src / 'OfficialWritebackTrial.kt').read_text()
 assert '复制设备兼容性诊断' in (src / 'MainActivity.kt').read_text()
-assert 'setData' not in notifier or 'intent.data' in notifier
+assert '.setData(Uri.parse("momoflow://official-trial/' in notifier
 print('V0.5.4 CHECK PASS: 3 same-word official manual trial actions, no private writeback')
