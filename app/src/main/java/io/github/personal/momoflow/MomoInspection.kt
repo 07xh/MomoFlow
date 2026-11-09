@@ -72,60 +72,128 @@ class MomoInspectionStore(context: Context) {
     }
 }
 
-/** Watches ONLY the official MaiMemo package. Never clicks, dispatches gestures or sends data out. */
+/**
+ * Scoped service. Read-only diagnostics remain available; ONLY a fresh explicit
+ * user notification tap with opt-in can trigger one ACTION_CLICK in MaiMemo.
+ * No text dumps, root gestures, network interception or background taps.
+ */
 class MomoInspectionService : AccessibilityService() {
+    private val handler = android.os.Handler(android.os.Looper.getMainLooper())
     private var lastScanMs = 0L
+    private var scheduledNonce: String? = null
+
+    private data class PageScan(
+        val wordCount: Int,
+        val visible: Map<String, Int>,
+        val actions: Map<String, List<AccessibilityNodeInfo>>
+    ) {
+        val clickable: Map<String, Int> get() = actions.mapValues { it.value.size }
+        val distinctActions: Boolean get() {
+            val nodes = actions.values.flatten()
+            return nodes.size == 3 && nodes.distinct().size == 3
+        }
+        fun isEligible(label: String): Boolean = ForegroundFeedbackGate.canAct(
+            label, wordCount, visible, clickable, distinctActions
+        )
+    }
+
+    private fun clickableAncestor(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+        var current: AccessibilityNodeInfo? = node
+        repeat(4) {
+            val item = current ?: return null
+            if (item.isVisibleToUser && item.isEnabled &&
+                (item.isClickable || item.actionList.any {
+                    it.id == AccessibilityNodeInfo.ACTION_CLICK
+                })) return item
+            current = item.parent
+        }
+        return null
+    }
+
+    private fun inspect(root: AccessibilityNodeInfo, target: String): PageScan {
+        val visible = mutableMapOf<String, Int>()
+        val actions = mutableMapOf<String, MutableList<AccessibilityNodeInfo>>()
+        var wordCount = 0
+        var visited = 0
+        fun traverse(node: AccessibilityNodeInfo, depth: Int) {
+            if (depth > 16 || visited++ >= 400 || !node.isVisibleToUser) return
+            val captions = listOfNotNull(node.text?.toString(), node.contentDescription?.toString())
+                .map(String::trim).distinct()
+            if (captions.any { it.equals(target, ignoreCase = true) }) wordCount++
+            val labels = captions.mapNotNull(MomoLabelMatcher::feedbackLabel).distinct()
+            for (label in labels) {
+                visible[label] = (visible[label] ?: 0) + 1
+                val clickable = clickableAncestor(node)
+                if (clickable != null) {
+                    val peers = actions.getOrPut(label) { mutableListOf() }
+                    if (peers.none { it == clickable }) peers.add(clickable)
+                }
+            }
+            for (i in 0 until node.childCount) {
+                node.getChild(i)?.let { traverse(it, depth + 1) }
+            }
+        }
+        traverse(root, 0)
+        return PageScan(wordCount, visible, actions)
+    }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event?.packageName?.toString() != MOMO_PACKAGE) return
-        val capture = MomoInspectionStore(this)
-        val target = capture.targetWord() ?: return
         val now = System.currentTimeMillis()
-        if (now - lastScanMs < 500L) return
+        val actionStore = OfficialForegroundActionStore(this)
+        val armed = if (SecureStore(this).autoFeedbackEnabled()) actionStore.pending(now) else null
+        val capture = MomoInspectionStore(this)
+        val target = armed?.spelling ?: capture.targetWord() ?: return
+        if (now - lastScanMs < 250L) return
         lastScanMs = now
+
         val root = rootInActiveWindow ?: return
         if (root.packageName?.toString() != MOMO_PACKAGE) return
+        val scan = inspect(root, target)
 
-        var wordVisible = false
-        val visible = mutableSetOf<String>()
-        val clickable = mutableSetOf<String>()
-        var nodes = 0
-
-        fun isClickableNode(node: AccessibilityNodeInfo): Boolean {
-            var current: AccessibilityNodeInfo? = node
-            repeat(4) {
-                val candidate = current ?: return false
-                if (candidate.isVisibleToUser && candidate.isEnabled &&
-                    (candidate.isClickable || candidate.actionList.any {
-                        it.id == AccessibilityNodeInfo.ACTION_CLICK
-                    })
-                ) return true
-                current = candidate.parent
-            }
-            return false
+        if (capture.active() && capture.targetWord()?.equals(target, true) == true) {
+            capture.report(
+                scan.wordCount > 0,
+                scan.visible.filterValues { it > 0 }.keys,
+                scan.clickable.filterValues { it > 0 }.keys
+            )
         }
 
-        fun walk(node: AccessibilityNodeInfo, depth: Int) {
-            if (depth > 16 || nodes++ >= 400) return
-            if (!node.isVisibleToUser) return
-            val candidates = listOfNotNull(node.text?.toString(), node.contentDescription?.toString())
-                .map(String::trim)
-            if (candidates.any { it.equals(target, ignoreCase = true) }) wordVisible = true
-
-            candidates.mapNotNull(MomoLabelMatcher::feedbackLabel).forEach { label ->
-                visible.add(label)
-                if (isClickableNode(node)) clickable.add(label)
+        if (armed == null || scheduledNonce != null || !scan.isEligible(armed.mark.label)) return
+        // Require stable screen/word/buttons across TWO different UI snapshots.
+        scheduledNonce = armed.nonce
+        handler.postDelayed({
+            scheduledNonce = null
+            val pending = actionStore.pending() ?: return@postDelayed
+            if (pending.nonce != armed.nonce || !SecureStore(this).autoFeedbackEnabled()) return@postDelayed
+            val secondRoot = rootInActiveWindow ?: return@postDelayed
+            if (secondRoot.packageName?.toString() != MOMO_PACKAGE) return@postDelayed
+            val second = inspect(secondRoot, pending.spelling)
+            if (!second.isEligible(pending.mark.label)) return@postDelayed
+            val button = second.actions[pending.mark.label]?.singleOrNull() ?: return@postDelayed
+            if (actionStore.claim(pending.nonce)) {
+                val clicked = try {
+                    button.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                } catch (_: Exception) { false }
+                actionStore.complete(clicked)
             }
-            for (i in 0 until node.childCount) node.getChild(i)?.let { walk(it, depth + 1) }
-        }
-
-        walk(root, 0)
-        capture.report(wordVisible, visible, clickable)
+        }, 350L)
     }
 
     override fun onInterrupt() = Unit
 
     companion object {
         const val MOMO_PACKAGE = "com.maimemo.android.momo"
+
+        fun isUserEnabled(context: Context): Boolean {
+            val manager = context.getSystemService(android.view.accessibility.AccessibilityManager::class.java)
+            return manager.isEnabled && manager.getEnabledAccessibilityServiceList(
+                android.accessibilityservice.AccessibilityServiceInfo.FEEDBACK_ALL_MASK
+            ).any {
+                val info = it.resolveInfo.serviceInfo
+                info.packageName == context.packageName &&
+                    info.name.endsWith(".MomoInspectionService")
+            }
+        }
     }
 }
