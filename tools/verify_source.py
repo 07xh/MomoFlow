@@ -21,10 +21,15 @@ assert 'hasPromotableCharacteristics()' in notifier
 assert 'Notification.FLAG_PROMOTED_ONGOING' in notifier
 assert 'android.requestPromotedOngoing' in notifier
 assert 'activeNotifications' in notifier
-assert '显示释义' in notifier and '隐藏释义' in notifier
-receiver = (src / 'WordActionReceiver.kt').read_text()
-assert 'LOCAL_FORGET' not in receiver
-assert 'intent.getStringExtra(WORD_ID) != current.id' in receiver
+assert 'officialTrialAction(' in notifier
+assert 'PendingIntent.getActivity' in notifier
+assert all(x in notifier for x in ('认识·验证', '模糊·验证', '忘记·验证'))
+assert 'WordActionReceiver' not in notifier
+guard = (src / 'NotificationTrialGate.kt').read_text()
+assert 'current.id != wordId' in guard and '!active' in guard and '!isToday' in guard
+activity = (src / 'MainActivity.kt').read_text()
+assert 'handleNotificationTrial(intent)' in activity
+assert 'startOfficialTrial(selected.word, selected.expected)' in activity
 store = (src / 'LocalFeedbackStore.kt').read_text()
 assert 'SharedPreferences' not in store or 'getSharedPreferences' in store
 assert '.mark' not in client, 'The official API client must remain read-only'
@@ -48,4 +53,4 @@ print('STATIC CHECK PASS: XML, read-only API, official comparison, scoped read-o
 assert 'saveReport' in (src / 'OfficialWritebackTrial.kt').read_text()
 assert '复制设备兼容性诊断' in (src / 'MainActivity.kt').read_text()
 assert 'setData' not in notifier or 'intent.data' in notifier
-print('V0.4 CHECK PASS: word-scoped notification controls, persisted report, no private writeback')
+print('V0.5.4 CHECK PASS: 3 same-word official manual trial actions, no private writeback')
