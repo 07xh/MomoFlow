@@ -11,12 +11,14 @@ data class OfficialWritebackTrial(
     val day: String,
     val startedAtMs: Long,
     val before: OfficialRecord?,
+    val beforeToday: OfficialTodayState? = null,
 ) {
     fun toJson(): JSONObject = JSONObject()
         .put("word_id", wordId).put("spelling", spelling)
         .put("expected", expected.wire).put("day", day)
         .put("started_at_ms", startedAtMs)
         .put("before", before?.toJson())
+        .put("before_today", beforeToday?.toJson())
 
     companion object {
         fun parse(json: JSONObject): OfficialWritebackTrial {
@@ -25,6 +27,7 @@ data class OfficialWritebackTrial(
                 json.getString("word_id"), json.getString("spelling"), expected,
                 json.getString("day"), json.getLong("started_at_ms"),
                 json.optJSONObject("before")?.let(OfficialRecord::parse),
+                json.optJSONObject("before_today")?.let(OfficialTodayState::parse),
             )
         }
     }
