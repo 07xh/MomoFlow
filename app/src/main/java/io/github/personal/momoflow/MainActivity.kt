@@ -174,8 +174,17 @@ class MainActivity : Activity() {
             wordPane.addView(label(word.spelling, 34f, ink, true))
             wordPane.addView(gap(10))
             val meaning = store.cachedMeaning(word.id)
-            if (store.reveal()) wordPane.addView(label(meaning ?: "还没有读取到释义", 14f, muted))
-            else wordPane.addView(label("释义已隐藏", 14f, muted))
+            if (store.reveal()) {
+                wordPane.addView(label(meaning ?: "还没有读取到释义", 14f, muted))
+                if (meaning != null) {
+                    val source = when (store.meaningSource(word.id)) {
+                        "official" -> "来源：墨墨开放 API 公开释义"
+                        else -> "来源：ECDICT 离线词典（非墨墨内置释义）"
+                    }
+                    wordPane.addView(gap(5))
+                    wordPane.addView(label(source, 11f, muted))
+                }
+            } else wordPane.addView(label("释义已隐藏", 14f, muted))
             wordPane.addView(gap(16))
             wordPane.addView(horizontal(
                 button("上一个", false) { move(-1, snapshot.words.size) },
@@ -184,8 +193,11 @@ class MainActivity : Activity() {
             wordPane.addView(gap(10))
             wordPane.addView(horizontal(
                 button(if (store.reveal()) "隐藏释义" else "显示释义", false) {
-                    store.setReveal(!store.reveal()); draw()
-                    if (store.reveal() && store.cachedMeaning(word.id) == null) queryMeaning(word)
+                    val reveal = !store.reveal()
+                    store.setReveal(reveal)
+                    draw()
+                    // An offline meaning must not suppress the first official lookup.
+                    if (reveal && !store.officialMeaningCheckedToday(word.id)) queryMeaning(word)
                     LiveWordNotification.publish(this)
                 },
                 button(if (queryingWordId == word.id) "查询中…" else "查墨墨释义", false) { queryMeaning(word) }
@@ -469,11 +481,13 @@ class MainActivity : Activity() {
                     if (token == store.token()) {
                         if (results.isNotEmpty()) {
                             store.saveMeaning(word.id, results.joinToString("\n"))
+                            message = "已获取墨墨开放 API 释义"
                         } else {
-                            // Official definitions may only be user-created content.
-                            // Do not overwrite a valid ECDICT meaning with an empty API result.
-                            message = "墨墨未返回用户自建释义，继续使用本地英汉词典"
+                            // Open API does not promise the App's built-in definitions.
+                            // Keep the optional offline translation when no public one exists.
+                            message = "墨墨开放 API 未返回可用公开释义，保留本地英汉翻译"
                         }
+                        store.markOfficialMeaningCheckedToday(word.id)
                     }
                     queryingWordId = null; draw()
                     LiveWordNotification.publish(this)
