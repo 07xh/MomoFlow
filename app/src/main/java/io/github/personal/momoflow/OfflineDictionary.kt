@@ -63,6 +63,7 @@ object OfflineDictionary {
                         val phonetic = cursor.getString(1)?.trim().orEmpty()
                         val display = if (phonetic.isBlank()) meaning else "[$phonetic] $meaning"
                         editor.putString("meaning.${word.id}", display)
+                        editor.putString("meaning_source.${word.id}", "offline")
                         inserted++
                     }
                 }
