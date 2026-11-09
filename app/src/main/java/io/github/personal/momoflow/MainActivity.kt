@@ -26,6 +26,12 @@ import android.widget.TextView
 import android.widget.Toast
 
 class MainActivity : Activity() {
+    companion object {
+        const val ACTION_START_OFFICIAL_TRIAL = "io.github.personal.momoflow.START_OFFICIAL_TRIAL"
+        const val EXTRA_TRIAL_WORD_ID = "official_trial_word_id"
+        const val EXTRA_TRIAL_MARK = "official_trial_mark"
+    }
+
     private val store by lazy { SecureStore(this) }
     private val ink = Color.parseColor("#142D54")
     private val muted = Color.parseColor("#667D9B")
@@ -43,6 +49,42 @@ class MainActivity : Activity() {
         window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
         trialStatus = OfficialTrialStore(this).lastReport()
         draw()
+        handleNotificationTrial(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleNotificationTrial(intent)
+    }
+
+    /**
+     * Android notification actions only prepare a manual trial and foreground
+     * the original MaiMemo App. They NEVER pretend to submit a feedback mark.
+     */
+    private fun handleNotificationTrial(incoming: Intent?) {
+        if (incoming?.action != ACTION_START_OFFICIAL_TRIAL) return
+        // Consume this explicit tap once; Activity recreation must not resubmit a trial.
+        incoming.action = Intent.ACTION_MAIN
+        val snapshot = store.snapshot()
+        val selected = NotificationTrialGate.select(
+            snapshot = snapshot,
+            isToday = snapshot?.let(store::isToday) == true,
+            active = store.active(),
+            index = store.index(),
+            wordId = incoming.getStringExtra(EXTRA_TRIAL_WORD_ID),
+            markWire = incoming.getStringExtra(EXTRA_TRIAL_MARK)
+        )
+        if (selected == null) {
+            trialStatus = "通知已过期，或词条与当前会话不一致；未开始官方反馈验证，请重新同步后再操作。"
+            draw()
+            return
+        }
+        if (trialBusy) {
+            hint("正在读取上一次验证的基线，请勿重复点击")
+            return
+        }
+        startOfficialTrial(selected.word, selected.expected)
     }
 
     override fun onResume() {
@@ -292,6 +334,8 @@ class MainActivity : Activity() {
 
         val toolsPane = pane()
         toolsPane.addView(label("流体云与快捷入口", 16f, ink, true))
+        toolsPane.addView(gap(6))
+        toolsPane.addView(label("通知中的认识 / 模糊 / 忘记会开启“官方同词验证”并跳转墨墨；仍需在官方 App 手动点击。当前不会后台自动写回。", 11f, muted))
         toolsPane.addView(gap(8))
         toolsPane.addView(label(LiveWordNotification.diagnostics(this), 12f, muted))
         if (Build.VERSION.SDK_INT >= 36) {
@@ -542,7 +586,7 @@ class MainActivity : Activity() {
     /** Safe to paste into a support conversation: never reads or prints token, vocabulary or account data. */
     private fun copyDiagnostics() {
         val report = buildString {
-            appendLine("MomoFlow 0.5.2 · 设备诊断（不含账号数据）")
+            appendLine("MomoFlow 0.5.4 · 设备诊断（不含账号数据）")
             appendLine("设备：${Build.MANUFACTURER} ${Build.MODEL}; SDK ${Build.VERSION.SDK_INT}")
             appendLine("通知权限：${if (LiveWordNotification.canPost(this@MainActivity)) "允许" else "未允许"}")
             appendLine(LiveWordNotification.diagnostics(this@MainActivity))
