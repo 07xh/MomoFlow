@@ -34,4 +34,9 @@ class NotificationTrialGateTest {
     @Test fun rejectsInvalidCurrentIndex() {
         assertNull(NotificationTrialGate.select(snapshot, true, true, 9, "id-2", "FAMILIAR"))
     }
+    @Test fun duplicateSpellingWithDifferentIdsCannotSelectAutoAction() {
+        val duplicate = StudyWord("id-3", "similar", 3, false, false)
+        val ambiguous = snapshot.copy(words = listOf(first, duplicate, second))
+        assertNull(NotificationTrialGate.select(ambiguous, true, true, 0, "id-1", "FAMILIAR"))
+    }
 }
