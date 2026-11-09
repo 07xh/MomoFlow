@@ -26,6 +26,16 @@ class StudyModelsTest {
         assertFalse(parsed.words.single().isFinished)
     }
 
+    @Test fun parsesOfficialProgressWithoutTreatingLocalFeedbackAsCompletion() {
+        val progress = StudyProgress.parse(JSONObject("""{
+          "finished": 7, "total": 28, "study_time": 125000
+        }"""))
+        assertEquals(7, progress.finished)
+        assertEquals(28, progress.total)
+        assertEquals(125000L, progress.timeMs)
+        assertEquals(21, progress.total - progress.finished)
+    }
+
     @Test fun rejectsEmptyVocabularyIds() {
         try {
             StudyWord.parse(JSONObject("""{"voc_id":"", "voc_spelling":"test"}"""))
