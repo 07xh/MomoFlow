@@ -110,8 +110,8 @@ object LiveWordNotification {
             else -> "正常"
         }
         return "实验开关：${if (experimental) "开" else "关"} · 提升权限：${if (allowed) "允许" else "未允许"}" +
-            "\\n通知渠道：$channelState · 提升请求：$requestState" +
-            "\\n资格检查：$eligibility · 实际系统标记：$promoted" +
-            "\\n注意：系统提升标记不等于 ColorOS 原生胶囊成功显示"
+            "\n通知渠道：$channelState · 提升请求：$requestState" +
+            "\n资格检查：$eligibility · 实际系统标记：$promoted" +
+            "\n注意：系统提升标记不等于 ColorOS 原生胶囊成功显示"
     }
 }
