@@ -44,6 +44,7 @@ class MainActivity : Activity() {
     private var drawnPage = 0
     private val scrollPositions = intArrayOf(0, 0)
     private var activeScroller: ScrollView? = null
+    private var restoringScroll = false
     private var requestGeneration = 0
     private var connectionGeneration = 0
     private var syncing = false
@@ -124,7 +125,7 @@ class MainActivity : Activity() {
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
-        activeScroller?.let { scrollPositions[drawnPage] = it.scrollY }
+        if (!restoringScroll) activeScroller?.let { scrollPositions[drawnPage] = it.scrollY }
         outState.putInt("page", page)
         outState.putIntArray("scroll", scrollPositions)
         super.onSaveInstanceState(outState)
@@ -177,8 +178,9 @@ class MainActivity : Activity() {
     }
     private fun draw() {
         if (isDestroyed || isFinishing) return
-        activeScroller?.let { scrollPositions[drawnPage] = it.scrollY }
+        if (!restoringScroll) activeScroller?.let { scrollPositions[drawnPage] = it.scrollY }
         drawnPage = page
+        restoringScroll = true
         val frame = FrameLayout(this).apply { setBackgroundColor(Color.parseColor("#F5F7F6")) }
         val scroller = ScrollView(this).apply { isFillViewport = true; isVerticalScrollBarEnabled = false }
         activeScroller = scroller
@@ -213,7 +215,12 @@ class MainActivity : Activity() {
         }.toTypedArray()))
         column.addView(gap(20))
         if (page == 0) drawStudy(column) else drawSettings(column)
-        scroller.post { scroller.scrollTo(0, scrollPositions[page]) }
+        scroller.post {
+            if (activeScroller === scroller) {
+                scroller.scrollTo(0, scrollPositions[drawnPage])
+                restoringScroll = false
+            }
+        }
     }
 
     private fun drawStudy(column: LinearLayout) {
@@ -253,7 +260,11 @@ class MainActivity : Activity() {
                 if (store.reveal()) {
                     addView(label(store.cachedMeaning(word.id) ?: "暂无释义，可尝试查询公开释义", 16f, muted))
                     if (store.cachedMeaning(word.id) != null) {
-                        addView(gap(6)); addView(label(if (store.meaningSource(word.id) == "official") "墨墨开放 API 公开释义" else "ECDICT 离线词典", 11f, muted))
+                        addView(gap(6)); addView(label(when (store.meaningSource(word.id)) {
+                            "official" -> "墨墨开放 API 公开释义"
+                            "offline" -> "ECDICT 离线词典"
+                            else -> "旧版缓存 · 来源待重新查询"
+                        }, 11f, muted))
                     }
                 }
                 addView(gap(12))
@@ -296,7 +307,7 @@ class MainActivity : Activity() {
             addView(label(if (trialBusy) "正在核对官方记录…" else if (pending != null) "本次反馈待核对" else "最近反馈结果", 16f, ink, true))
             if (pending != null) {
                 addView(gap(8)); addView(label("${pending.spelling} · ${pending.expected.label}", 16f, accent, true))
-                addView(gap(6)); addView(label("返回后以官方记录核对结果；同步延迟时可重查。", 12f, muted))
+                addView(gap(6)); addView(label("返回后点击核对；自动点击成功派发后会自动读回一次，同步延迟时可重查。", 12f, muted))
                 addView(gap(12)); addView(button(if (trialBusy) "核对中…" else "重新核对官方记录") { verifyOfficialTrial() }.apply { isEnabled = !trialBusy })
             }
             if (!trialBusy) OfficialTrialStore(this@MainActivity).lastStatus()?.let { status ->
@@ -530,7 +541,7 @@ class MainActivity : Activity() {
                     trialStatus = if (autoReady) {
                         "已授权 ${word.spelling} 的一次${mark.label}操作。仅在墨墨同词和三个按钮均唯一可点击时触发，60 秒失效。返回后自动核对官方记录。"
                     } else {
-                        "请在墨墨核对 ${word.spelling} 后手动点${mark.label}，返回后核对官方记录。"
+                        "请在墨墨核对 ${word.spelling} 后手动点${mark.label}，返回后点击「重新核对官方记录」。"
                     }
                     draw(); openMomo()
                 }
@@ -585,6 +596,7 @@ class MainActivity : Activity() {
                         OfficialTrialStore(this).pending() != trial) return@runOnUiThread
                     trialBusy = false
                     trialStatus = "核对请求失败：${error.message ?: "网络异常"}。保留本次记录，可稍后重查。"
+                    OfficialTrialStore(this).saveReport(trialStatus)
                     draw()
                 }
             }

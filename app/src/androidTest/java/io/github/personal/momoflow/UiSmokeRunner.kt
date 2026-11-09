@@ -3,6 +3,7 @@ package io.github.personal.momoflow
 import android.app.Activity
 import android.app.Instrumentation
 import android.content.Intent
+import android.graphics.Rect
 import android.graphics.Bitmap
 import android.os.Bundle
 import android.view.View
@@ -24,6 +25,21 @@ class UiSmokeRunner : Instrumentation() {
             check(button.performClick()) { "Click rejected: $text" }
         }
         waitForIdleSync()
+    }
+
+    private fun verifyFullyVisible(text: String) {
+        runOnMainSync {
+            val view = walk(activity.window.decorView).filterIsInstance<TextView>().single { it.text.toString() == text }
+            view.requestRectangleOnScreen(Rect(0, 0, view.width, view.height), true)
+        }
+        waitForIdleSync()
+        runOnMainSync {
+            val view = walk(activity.window.decorView).filterIsInstance<TextView>().single { it.text.toString() == text }
+            val bounds = Rect()
+            check(view.getGlobalVisibleRect(bounds) && bounds.width() == view.width && bounds.height() == view.height) {
+                "Clipped or inaccessible control: $text"
+            }
+        }
     }
 
     private fun screenshot(name: String) {
@@ -72,7 +88,38 @@ class UiSmokeRunner : Instrumentation() {
                 check(OfficialForegroundActionStore(targetContext).pending() == null) { "Click request survived cancellation" }
                 check(!MomoInspectionStore(targetContext).active()) { "Inspection survived cancellation" }
             }
-            result.putString("uiSmoke", "PASS: study/settings/dialog navigation and pending action cancellation")
+            // Populated layout is a test fixture only, never an account/API success claim.
+            runOnMainSync {
+                SecureStore(targetContext).saveSnapshot(StudySnapshot(
+                    StudyDay.today(), StudyProgress(1, 3, 0),
+                    listOf(fixture.copy(spelling = "ui-test-only-long-vocabulary")), System.currentTimeMillis()
+                ))
+            }
+            click("设置"); click("背词")
+            for (caption in listOf("显示释义", "认识", "模糊", "忘记", "开始背词")) verifyFullyVisible(caption)
+            verifyFullyVisible("认识")
+            screenshot("03-populated-test-fixture.png")
+            click("设置")
+            runOnMainSync {
+                walk(activity.window.decorView).filterIsInstance<android.widget.ScrollView>().single().scrollTo(0, 400)
+            }
+            waitForIdleSync()
+            var savedScroll = 0
+            runOnMainSync {
+                savedScroll = walk(activity.window.decorView).filterIsInstance<android.widget.ScrollView>().single().scrollY
+            }
+            check(savedScroll > 0)
+            val monitor = addMonitor(MainActivity::class.java.name, null, false)
+            runOnMainSync { activity.recreate() }
+            activity = checkNotNull(waitForMonitorWithTimeout(monitor, 5_000)) { "Recreation did not finish" }
+            removeMonitor(monitor)
+            waitForIdleSync()
+            runOnMainSync {
+                val restored = walk(activity.window.decorView).filterIsInstance<android.widget.ScrollView>().single().scrollY
+                check(restored == savedScroll) { "Scroll lost after recreation: $savedScroll -> $restored" }
+                SecureStore(targetContext).clearStudyData()
+            }
+            result.putString("uiSmoke", "PASS: navigation, cancellation, populated controls and scroll recreation")
             finish(Activity.RESULT_OK, result)
         } catch (error: Throwable) {
             result.putString("uiSmoke", "FAIL: ${error.stackTraceToString()}")
