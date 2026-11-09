@@ -83,6 +83,7 @@ class OfficialForegroundActionStore(context: Context) {
         val snapshot = SecureStore(context).snapshot() ?: return false
         if (!SecureStore(context).active() || !SecureStore(context).isToday(snapshot)) return false
         if (snapshot.words.getOrNull(SecureStore(context).index())?.id != action.wordId) return false
+        if (snapshot.words.count { it.spelling.equals(action.spelling, ignoreCase = true) } != 1) return false
         val trial = OfficialTrialStore(context).pending() ?: return false
         if (trial.wordId != action.wordId || trial.expected != action.mark) return false
         return prefs.edit().remove("auto_feedback.pending")
