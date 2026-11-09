@@ -31,7 +31,7 @@ guard = (src / 'NotificationTrialGate.kt').read_text()
 assert 'current.id != wordId' in guard and '!active' in guard and '!isToday' in guard
 activity = (src / 'MainActivity.kt').read_text()
 assert 'handleNotificationTrial(intent)' in activity
-assert 'startOfficialTrial(selected.word, selected.expected)' in activity
+assert 'startOfficialTrial(selected.word, selected.expected, autoAttempt = store.autoFeedbackEnabled())' in activity
 store = (src / 'LocalFeedbackStore.kt').read_text()
 assert 'SharedPreferences' not in store or 'getSharedPreferences' in store
 assert '.mark' not in client, 'The official API client must remain read-only'
