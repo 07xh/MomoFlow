@@ -11,7 +11,7 @@ manifest = (root / 'app/src/main/AndroidManifest.xml').read_text()
 assert 'android.permission.POST_PROMOTED_NOTIFICATIONS' in manifest
 assert 'android.permission.POST_NOTIFICATIONS' in manifest
 client = (src / 'MaiMemoClient.kt').read_text()
-assert 'request("POST", "/study/get_study_progress")' in client
+assert 'request("POST", "/study/get_study_progress", JSONObject())' in client
 assert 'request("POST", "/study/get_today_items", payload)' in client
 assert 'request("GET", "/interpretations?voc_id=$safeId")' in client
 assert 'get_today_items' in client and 'limit", 1000' in client
