@@ -267,6 +267,16 @@ class MainActivity : Activity() {
         if (trialStatus.isNotBlank()) {
             trialPane.addView(gap(8)); trialPane.addView(label(trialStatus, 12f, muted))
         }
+        val officialReport = OfficialTrialStore(this).lastReport()
+        if (officialReport.isNotBlank()) {
+            trialPane.addView(gap(7))
+            trialPane.addView(button("复制官方状态对照结果（不含 Token 或单词 ID）", false) {
+                getSystemService(ClipboardManager::class.java).setPrimaryClip(
+                    ClipData.newPlainText("MomoFlow official readback", officialReport)
+                )
+                hint("已复制官方只读对照结果；这是状态观察，不代表 MomoFlow 已写回")
+            })
+        }
         trialPane.addView(gap(8))
         trialPane.addView(label("只读识别结果：${MomoInspectionStore(this).lastReport()}", 11f, muted))
         trialPane.addView(gap(8))

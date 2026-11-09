@@ -55,4 +55,54 @@ class OfficialSyncAssessmentTest {
         )
         assertTrue(message.contains("ID 不一致"))
     }
+
+    @Test fun contradictoryLatestFeedbackCannotBeCalledAMatch() {
+        val beforeToday = OfficialTodayState("voc-1", "important", null, false)
+        val afterToday = beforeToday.copy(firstResponse = "FAMILIAR", isFinished = true)
+        val result = OfficialSyncAssessment.evaluate(
+            record("FORGET"), record("VAGUE", 3),
+            beforeToday, afterToday, LocalMark.FAMILIAR
+        )
+        assertEquals(OfficialSyncStatus.CONFLICT, result.status)
+        assertTrue(result.message.contains("不匹配"))
+    }
+
+    @Test fun missingBeforeTodayIsIncompleteNotPositive() {
+        val afterToday = OfficialTodayState("voc-1", "important", "FAMILIAR", true)
+        val result = OfficialSyncAssessment.evaluate(
+            record("FORGET"), record("FAMILIAR", 3),
+            null, afterToday, LocalMark.FAMILIAR
+        )
+        assertEquals(OfficialSyncStatus.INCOMPLETE, result.status)
+        assertTrue(result.message.contains("不能判断"))
+    }
+
+    @Test fun vanishedHistoricalRecordIsIncomplete() {
+        val today = OfficialTodayState("voc-1", "important", null, false)
+        val result = OfficialSyncAssessment.evaluate(
+            record("FORGET"), null,
+            today, today.copy(firstResponse = "FAMILIAR"), LocalMark.FAMILIAR
+        )
+        assertEquals(OfficialSyncStatus.INCOMPLETE, result.status)
+    }
+
+    @Test fun onlyCompletionChangedIsNotEvidenceOfExpectedAnswer() {
+        val beforeToday = OfficialTodayState("voc-1", "important", "FORGET", false)
+        val result = OfficialSyncAssessment.evaluate(
+            record("FORGET"), record("FORGET", 3),
+            beforeToday, beforeToday.copy(isFinished = true), LocalMark.FAMILIAR
+        )
+        assertEquals(OfficialSyncStatus.UNCONFIRMED_CHANGE, result.status)
+    }
+
+    @Test fun changedFirstResponseAloneCanProveObservedOfficialState() {
+        val beforeToday = OfficialTodayState("voc-1", "important", null, false)
+        val result = OfficialSyncAssessment.evaluate(
+            null, null, beforeToday, beforeToday.copy(firstResponse = "VAGUE"),
+            LocalMark.VAGUE
+        )
+        assertEquals(OfficialSyncStatus.OBSERVED_MATCH, result.status)
+        assertTrue(result.message.contains("无法仅凭对照证明"))
+    }
+
 }
