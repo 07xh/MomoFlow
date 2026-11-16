@@ -62,3 +62,14 @@ assert 'saveReport' in (src / 'OfficialWritebackTrial.kt').read_text()
 assert '复制设备兼容性诊断' in (src / 'MainActivity.kt').read_text()
 assert '.setData(Uri.parse("momoflow://official-trial/' in notifier
 print('V0.5.5 CHECK PASS: one-shot guarded foreground click, user opt-in, official readback')
+
+# Cortex 5.6.10 APK strings are not an authenticated/verified write contract.
+cortex = (src / 'CortexStudyAdapter.kt').read_text()
+assert 'class CortexStudyAdapter' in cortex
+assert 'NOT_SENT_UNVERIFIED' in cortex
+assert 'networkAttempted = false' in cortex
+assert 'RESPONSE_UNCERTAIN' in cortex and 'RESPONSE_VAGUE' in cortex
+assert 'HttpURLConnection' not in cortex and 'openConnection(' not in cortex
+assert 'CortexStudyAdapter(' not in client, 'Public Open API client must stay separate'
+assert (root / 'docs/CORTEX_INTEGRATION.md').exists()
+print('CORTEX STAGING CHECK PASS: evidence gaps and no-network gate declared')
