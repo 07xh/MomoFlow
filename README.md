@@ -1,5 +1,13 @@
 # 墨墨流云助手 · MomoFlow v0.5.5（受控前台反馈实验版）
 
+## Cortex 接口接入准备（开发分支，未发布）
+
+- 已根据墨墨 5.6.10 APK 静态字符串建立 `CortexStudyAdapter`：接口路径登记、protobuf 枚举名称与三态候选数据模型。
+- **私有接口尚未发送任何请求**：缺认证方式、完整请求结构、checkpoint 生命周期、签名规则和真实回读；`submit()` 一律阻止发送。
+- 当前官方开放 API 读取、通知操作及现有前台单次反馈流程均不变；尤其「模糊」同时涉及 `RESPONSE_UNCERTAIN`、`RESPONSE_VAGUE`，尚未完成运行时映射确认。
+- 验收与缺口详见 [docs/CORTEX_INTEGRATION.md](docs/CORTEX_INTEGRATION.md)。**本项不是新版发布或后台写回完成声明。**
+
+
 ## v0.5.5：首个真实前台反馈尝试
 
 - 用户单独开启「前台自动反馈」并在 Android 系统无障碍设置里授权「墨墨页面诊断与单次反馈」。
