@@ -107,7 +107,7 @@ class CortexFeedbackTransactionTest {
     @Test fun contradictoryOfficialAnswerIsAConflict() {
         val tx = CortexFeedbackTransaction(
             CortexOfficialReader { if (readCall++ == 0) before else after.copy(
-                record = after.record!!.copy(lastResponse = "FORGET")
+                record = after.record!!.copy(lastResponse = "VAGUE")
             ) },
             CortexAuthorizedSender { _, _ -> CortexDispatchVerdict.ACCEPTED_UNVERIFIED }
         )
