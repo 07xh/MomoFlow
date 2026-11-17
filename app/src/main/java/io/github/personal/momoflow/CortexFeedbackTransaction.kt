@@ -83,8 +83,13 @@ class CortexFeedbackTransaction(
         isSameAccount: () -> Boolean,
     ): CortexTransactionResult {
         require(operationId.isNotBlank()) { "操作 ID 不能为空" }
-        if (draft.responseCandidates.size != 1 ||
-            CortexResponseTag.UNSPECIFIED in draft.responseCandidates) {
+        val requiredTag = when (draft.selectedMark) {
+            LocalMark.FAMILIAR -> CortexResponseTag.FAMILIAR
+            LocalMark.FORGET -> CortexResponseTag.FORGET
+            // An APK string alone cannot distinguish UNCERTAIN vs VAGUE.
+            LocalMark.VAGUE -> null
+        }
+        if (requiredTag == null || draft.responseCandidates != setOf(requiredTag)) {
             return CortexTransactionResult(CortexTransactionStatus.AMBIGUOUS_RESPONSE, false)
         }
         // Reserve the ID even for an unsuccessful request, so a timeout will
@@ -144,6 +149,6 @@ class CortexFeedbackTransaction(
     }
 
     private fun validBaseline(snapshot: CortexOfficialSnapshot, id: String): Boolean =
-        snapshot.today?.vocId == id && snapshot.today.isFinished == false &&
+        snapshot.today?.vocId == id && snapshot.today?.isFinished == false &&
             (snapshot.record == null || snapshot.record.vocId == id)
 }
