@@ -418,8 +418,9 @@ class MainActivity : Activity() {
         Thread {
             try {
                 val client = MaiMemoClient(token)
-                val original = client.record(word.id)
-                val beforeToday = client.todayState(word.id)
+                val baseline = CortexOpenApiReader(client).read(word.id)
+                val original = baseline.record
+                val beforeToday = baseline.today
                     ?: throw ApiException("官方今日列表未返回该词；请先在墨墨完成当天初始化并重新同步")
                 runOnUiThread {
                     if (token != store.token()) { trialBusy = false; trialStatus = "账号已变化，本次验证取消"; draw(); return@runOnUiThread }
@@ -461,8 +462,9 @@ class MainActivity : Activity() {
         Thread {
             try {
                 val client = MaiMemoClient(token)
-                val current = client.record(trial.wordId)
-                val currentToday = client.todayState(trial.wordId)
+                val currentObservation = CortexOpenApiReader(client).read(trial.wordId)
+                val current = currentObservation.record
+                val currentToday = currentObservation.today
                 runOnUiThread {
                     if (token != store.token()) { trialBusy = false; trialStatus = "账号已变化，不可比较"; draw(); return@runOnUiThread }
                     trialBusy = false
