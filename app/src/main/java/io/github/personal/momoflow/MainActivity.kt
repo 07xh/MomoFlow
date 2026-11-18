@@ -118,7 +118,7 @@ class MainActivity : Activity() {
     private fun dp(v: Int) = ui.dp(v)
     private fun gap(v: Int) = ui.gap(v)
     private fun label(value: String, sp: Float = 15f, color: Int = ink, bold: Boolean = false): TextView =
-        ui.text(value, sp, color, bold)
+        ui.text(value, sp.coerceAtLeast(12f), color, bold)
     private fun rounded(color: Int, radius: Int = 20, border: Int? = null) =
         ui.rounded(color, radius, border)
     private fun pane(): LinearLayout = ui.card()
@@ -438,9 +438,9 @@ class MainActivity : Activity() {
                 button("忘记", false) { startTrialForSpelling(snapshot, word, trialSpelling.text.toString(), LocalMark.FORGET) }
             ))
             trialPane.addView(gap(10))
-            trialPane.addView(button("只读识别墨墨背词页面控件（2 分钟）", false) { inspectMomo(word) })
+            trialPane.addView(button("2 分钟页面识别", false) { inspectMomo(word) })
             trialPane.addView(gap(6))
-            trialPane.addView(label("如需控件识别，请先在系统无障碍设置里手动开启“墨墨页面只读诊断”。它仅识别墨墨包名、当前目标词及三个反馈按钮，不执行点击。", 11f, muted))
+            trialPane.addView(label("识别需手动开启无障碍服务；仅检查目标单词与按钮，不执行点击。", 12f, muted))
             trialPane.addView(gap(7))
             trialPane.addView(button("打开无障碍服务设置", false) {
                 startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
@@ -450,7 +450,7 @@ class MainActivity : Activity() {
         if (pending != null) {
             trialPane.addView(label("待核对：${pending.spelling} · ${pending.expected.label}", 12f, accent, true))
             trialPane.addView(gap(5))
-            trialPane.addView(label("先确认墨墨原 App 显示的是同一个词，在那里手动反馈，再回到此处验证。", 11f, muted))
+            trialPane.addView(label("请确认原 App 的单词一致，再手动反馈并返回核验。", 12f, muted))
             trialPane.addView(gap(8))
             trialPane.addView(horizontal(
                 button(if (trialBusy) "核对中…" else "验证官方记录") { verifyOfficialTrial() },
@@ -471,7 +471,7 @@ class MainActivity : Activity() {
         val officialReport = OfficialTrialStore(this).lastReport()
         if (officialReport.isNotBlank()) {
             trialPane.addView(gap(7))
-            trialPane.addView(button("复制官方状态对照结果（不含 Token 或单词 ID）", false) {
+            trialPane.addView(button("复制官方核验结果", false) {
                 getSystemService(ClipboardManager::class.java).setPrimaryClip(
                     ClipData.newPlainText("MomoFlow official readback", officialReport)
                 )
