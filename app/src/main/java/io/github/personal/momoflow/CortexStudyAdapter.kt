@@ -86,9 +86,10 @@ class CortexStudyAdapter {
         require(word.id.isNotBlank()) { "单词 ID 不能为空" }
         val choices = when (mark) {
             LocalMark.FAMILIAR -> setOf(CortexResponseTag.FAMILIAR)
-            // The APK contains both UNCERTAIN and VAGUE; the actual UI
-            // mapping has NOT been established by a runtime trace.
-            LocalMark.VAGUE -> setOf(CortexResponseTag.UNCERTAIN, CortexResponseTag.VAGUE)
+            // A distinct wasm enum has UNCERTAIN while the Cortex JSON model
+            // has VAGUE. Use the wasm NAME only here; numeric value still
+            // requires a real on-device runtime capture.
+            LocalMark.VAGUE -> setOf(CortexResponseTag.UNCERTAIN)
             LocalMark.FORGET -> setOf(CortexResponseTag.FORGET)
         }
         return CortexFeedbackDraft(word.id, mark, choices)
