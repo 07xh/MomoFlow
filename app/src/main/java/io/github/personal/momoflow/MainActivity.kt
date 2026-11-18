@@ -462,7 +462,7 @@ class MainActivity : Activity() {
         val toolsPane = pane()
         toolsPane.addView(label("流体云与快捷入口", 16f, ink, true))
         toolsPane.addView(gap(6))
-        toolsPane.addView(label("通知三档按钮可选启用“墨墨前台单次反馈”。这是由墨墨自身处理的前台操作，并非未公开接口或纯后台写入；官方完成情况以回读为准。", 11f, muted))
+        toolsPane.addView(label("通知三档按钮默认走墨墨原 App 前台单次反馈或人工验证；只有单独授权并核对三档真实协议样本后，才优先走 Cortex 独立服务。两条路径都以官方回读为准。", 11f, muted))
         toolsPane.addView(gap(8))
         toolsPane.addView(button(if (store.autoFeedbackEnabled()) "关闭前台自动反馈" else "开启前台自动反馈（主动授权）", false) {
             val enable = !store.autoFeedbackEnabled()
@@ -505,7 +505,7 @@ class MainActivity : Activity() {
         toolsPane.addView(button("复制设备兼容性诊断（不含 Token）", false) { copyDiagnostics() })
         column.addView(toolsPane)
         column.addView(gap(16))
-        column.addView(label("开放 API 用于读取与回验；可选无障碍服务在明确授权的前台同词场景只尝试点击一次，不改变其他 App、不读取账号资料。无需 Root。", 11f, muted))
+        column.addView(label("开放 API 仅用于读取与回验；前台同词单次点击保留。Cortex 实验直连须另行授权并通过协议验证，默认关闭；不将 HTTP 成功视为学习完成。", 11f, muted))
     }
 
     private fun startCortexFeedback(word: StudyWord, mark: LocalMark) {
