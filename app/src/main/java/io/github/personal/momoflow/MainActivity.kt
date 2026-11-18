@@ -320,16 +320,6 @@ class MainActivity : Activity() {
             cortexStatus = "已清除 Cortex 凭证和上次核验记录"
             draw()
         })
-        /*
-        cortexPane.addView(horizontal(
-            button("检查连接与检查点", false) { inspectCortex() },
-            button("清除 Cortex 授权", false) {
-                cortexCredentials.clear()
-                cortexStatus = "Cortex 授权已清除"
-                draw()
-            }
-        ))
-        */
         if (cortexStatus.isNotBlank()) {
             cortexPane.addView(gap(9))
             val isError = cortexStatus.contains("403") || cortexStatus.contains("失败") || cortexStatus.contains("拒绝")
@@ -683,58 +673,67 @@ class MainActivity : Activity() {
         }.start()
     }
 
-    /** Validate a token against the real read-only Cortex endpoint before storing it. */
+    /** A rejected candidate never overwrites the last usable encrypted credential. */
     private fun importCortexAccessToken(raw: String) {
         if (cortexBusy) return
         val candidate = try { CortexTokenInput.normalize(raw) }
             catch (_: IllegalArgumentException) {
-                return hint("请输入有效的 Cortex Access Token；不能使用开放 API Token")
+                return hint("请输入 Cortex Bearer；开放 API Token 不能混用")
             }
+        val revision = ++cortexRequestRevision
         cortexBusy = true
-        cortexStatus = "正在验证 Cortex Token，只读取检查点…"
+        cortexStatus = "正在只读验证新凭证…"
         draw()
         Thread {
-            try {
-                CortexGatewayService().checkpoints(candidate)
-                CortexCredentialStore(this).saveAccessToken(candidate)
-                runOnUiThread {
-                    cortexBusy = false
-                    cortexStatus = "Cortex Token 验证成功，已用 Android Keystore 加密保存；后台写回仍未启用"
-                    draw()
+            val validation = runCatching { CortexGatewayService().checkpoints(candidate) }
+            runOnUiThread {
+                if (revision != cortexRequestRevision || isFinishing || isDestroyed) return@runOnUiThread
+                cortexBusy = false
+                if (validation.isSuccess) {
+                    try {
+                        CortexCredentialStore(this).saveAccessToken(candidate)
+                        CortexAuthHealthStore(this).markSuccess()
+                        cortexStatus = "只读检查点读取成功，凭证已加密保存；不代表后台写回成功"
+                    } catch (_: Exception) {
+                        cortexStatus = "只读检查已通过，但设备未能保存凭证"
+                    }
+                } else {
+                    cortexStatus = "新凭证未通过验证：${describeCortexFailure(validation.exceptionOrNull())}。原有凭证不变"
                 }
-            } catch (error: Exception) {
-                runOnUiThread {
-                    cortexBusy = false
-                    cortexStatus = "Cortex Token 验证失败：${error.message ?: "网络异常"}；未替换已有授权"
-                    draw()
-                }
+                draw()
             }
         }.start()
     }
 
     private fun exchangeCortex(legacyToken: String) {
         if (cortexBusy) return
-        if (legacyToken.isBlank()) return hint("请填写本人旧版登录 Token；不能自动把开放 API Token 当作 Cortex 登录凭证")
+        if (legacyToken.isBlank()) return hint("请填写本人会话的 Legacy Token")
+        val revision = ++cortexRequestRevision
         cortexBusy = true
-        cortexStatus = "正在交换 Cortex 授权…"
+        cortexStatus = "正在验证 Legacy 交换与检查点…"
         draw()
         Thread {
-            try {
+            val exchange = runCatching {
                 val gateway = CortexGatewayService()
                 val access = gateway.exchangeLegacyToken(legacyToken)
                 gateway.checkpoints(access)
-                CortexCredentialStore(this).saveAccessToken(access)
-                runOnUiThread {
-                    cortexBusy = false
-                    cortexStatus = "Cortex 授权交换并通过只读验证，已独立加密存储；尚未执行任何写回"
-                    draw()
+                access
+            }
+            runOnUiThread {
+                if (revision != cortexRequestRevision || isFinishing || isDestroyed) return@runOnUiThread
+                cortexBusy = false
+                if (exchange.isSuccess) {
+                    try {
+                        CortexCredentialStore(this).saveAccessToken(exchange.getOrThrow())
+                        CortexAuthHealthStore(this).markSuccess()
+                        cortexStatus = "Legacy 交换及检查点读取成功，已加密保存（只读）"
+                    } catch (_: Exception) {
+                        cortexStatus = "交换通过，但设备未能保存凭证"
+                    }
+                } else {
+                    cortexStatus = "交换或检查点验证失败：${describeCortexFailure(exchange.exceptionOrNull())}；未覆盖已有凭证"
                 }
-            } catch (error: Exception) {
-                runOnUiThread {
-                    cortexBusy = false
-                    cortexStatus = "授权交换未完成：${error.message ?: "网络异常"}"
-                    draw()
-                }
+                draw()
             }
         }.start()
     }
@@ -742,28 +741,52 @@ class MainActivity : Activity() {
     private fun inspectCortex() {
         if (cortexBusy) return
         val access = CortexCredentialStore(this).accessToken()
-            ?: return hint("请先配置 Cortex 授权")
+            ?: return hint("尚无 Cortex 凭证；请先导入")
+        val revision = ++cortexRequestRevision
         cortexBusy = true
-        cortexStatus = "正在检查 Cortex 服务…"
+        cortexStatus = "正在读取 Cortex 检查点和概览…"
         draw()
         Thread {
-            try {
+            val inspection = runCatching {
                 val gateway = CortexGatewayService()
                 gateway.checkpoints(access)
                 gateway.overview(access)
-                runOnUiThread {
+            }
+            runOnUiThread {
+                if (revision != cortexRequestRevision || isFinishing || isDestroyed) return@runOnUiThread
+                // Avoid attributing an old account's response to a changed credential.
+                if (CortexCredentialStore(this).accessToken() != access) {
                     cortexBusy = false
-                    cortexStatus = "Cortex 授权、检查点与概览接口读取成功（只读）；这不代表反馈已写入"
+                    cortexStatus = "凭证已更改，旧请求结果已忽略"
                     draw()
+                    return@runOnUiThread
                 }
-            } catch (error: Exception) {
-                runOnUiThread {
-                    cortexBusy = false
-                    cortexStatus = "Cortex 读取失败：${error.message ?: "网络异常"}"
-                    draw()
+                cortexBusy = false
+                try {
+                    if (inspection.isSuccess) {
+                        CortexAuthHealthStore(this).markSuccess()
+                        cortexStatus = "只读检查点与概览读取成功；未进行任何学习反馈写入"
+                    } else {
+                        val error = inspection.exceptionOrNull()
+                        CortexAuthHealthStore(this).markFailure((error as? CortexHttpException)?.statusCode ?: -1)
+                        cortexStatus = describeCortexFailure(error)
+                    }
+                } catch (_: Exception) {
+                    cortexStatus = "连接结果已获得，但保存状态失败"
                 }
+                draw()
             }
         }.start()
+    }
+
+    private fun describeCortexFailure(error: Throwable?): String = when (error) {
+        is CortexHttpException -> when (error.statusCode) {
+            401, 403 -> "HTTP ${error.statusCode}：服务器拒绝访问。请核对授权类型和接口权限"
+            429 -> "HTTP 429：请求过多，停止连续尝试"
+            else -> "HTTP ${error.statusCode}：服务端未接受请求"
+        }
+        is ApiException -> error.message ?: "Cortex 响应格式异常"
+        else -> "网络或协议异常，尚不能判断凭证是否失效"
     }
 
     private fun inspectMomo(word: StudyWord) {
