@@ -4,6 +4,9 @@ import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
 
+/** Typed HTTP failure without exposing request/response credentials. */
+class CortexHttpException(val statusCode: Int) : Exception("Cortex 接口返回 HTTP $statusCode")
+
 /**
  * Isolated Cortex HTTP boundary, based on the supplied 5.6.10 gateway evidence.
  * Only verified read endpoints and explicit legacy-token exchange are exposed.
@@ -58,9 +61,7 @@ class CortexGatewayService {
                 }
             }
             val status = connection.responseCode
-            if (status == 401 || status == 403) throw ApiException("Cortex 身份验证失败（HTTP $status）")
-            if (status == 429) throw ApiException("Cortex 请求过于频繁，请稍后再试")
-            if (status !in 200..299) throw ApiException("Cortex 接口返回 HTTP $status")
+            if (status !in 200..299) throw CortexHttpException(status)
             val raw = connection.inputStream.use { input ->
                 val bytes = input.readBytes()
                 if (bytes.size > 512 * 1024) throw ApiException("Cortex 响应过大")
@@ -72,6 +73,8 @@ class CortexGatewayService {
                 throw ApiException("Cortex 服务端表示请求失败")
             return json
         } catch (e: ApiException) {
+            throw e
+        } catch (e: CortexHttpException) {
             throw e
         } catch (_: Exception) {
             // Never expose request URLs with query parameters, headers, or tokens.
