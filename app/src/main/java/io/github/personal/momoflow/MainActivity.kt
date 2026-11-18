@@ -173,6 +173,7 @@ class MainActivity : Activity() {
                 try {
                     LiveWordNotification.stop(this)
                     store.clearStudyData() // no cross-account vocabulary leakage
+                    store.forgetCortexToken() // never carry Cortex auth to a new Open API account
                     store.saveToken(token)
                     WordWidget.updateAll(this)
                     message = "Token 已保存，请点击同步；今天需先在墨墨 App 完成初始化。"
@@ -181,7 +182,7 @@ class MainActivity : Activity() {
             },
             button("清除授权", false) {
                 LiveWordNotification.stop(this)
-                store.forgetToken(); store.clearStudyData(); message = "授权与学习缓存已清除"; draw()
+                store.forgetToken(); store.forgetCortexToken(); store.clearStudyData(); message = "所有授权与学习缓存已清除"; draw()
                 WordWidget.updateAll(this)
             }
         ))
@@ -409,6 +410,13 @@ class MainActivity : Activity() {
                 hint("样本不完整或编码不一致，保持禁止直连。请核对真实请求和字段编号。")
             }
         })
+        cortexPane.addView(gap(7))
+        cortexPane.addView(button("撤销本机协议验证", false) {
+            evidenceStore.clear()
+            cortexStatus = "已清除协议配置，所有 Cortex POST 自动阻止。"
+            LiveWordNotification.publish(this)
+            draw()
+        })
         cortexPane.addView(gap(8))
         cortexPane.addView(button(
             if (store.cortexDirectEnabled()) "关闭 Cortex 直连" else "开启 Cortex 直连（仅本人账号）",
@@ -429,7 +437,9 @@ class MainActivity : Activity() {
             if (cortexBusy) return@button
             cortexBusy = true
             Thread {
-                val outcome = CortexFeedbackService(applicationContext).reconcileLatest()
+                val outcome = try { CortexFeedbackService(applicationContext).reconcileLatest() }
+                    catch (_: Exception) { CortexWriteOutcome(CortexWriteState.PENDING,
+                        "回读出错，未重新提交；可稍后再次回读。") }
                 runOnUiThread { cortexBusy = false; cortexStatus = outcome.message; draw() }
             }.start()
         })
@@ -504,7 +514,9 @@ class MainActivity : Activity() {
         cortexStatus = "正在读取官方基线、登记唯一操作并检查 Cortex 同步状态…"
         draw()
         Thread {
-            val outcome = CortexFeedbackService(applicationContext).submit(word, mark)
+            val outcome = try { CortexFeedbackService(applicationContext).submit(word, mark) }
+                catch (_: Exception) { CortexWriteOutcome(CortexWriteState.PENDING,
+                    "服务运行异常：结果可能不确定，禁止重发；请仅回读上次操作。") }
             runOnUiThread {
                 cortexBusy = false
                 cortexStatus = outcome.message
