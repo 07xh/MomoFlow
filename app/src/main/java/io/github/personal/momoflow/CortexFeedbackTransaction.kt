@@ -86,8 +86,8 @@ class CortexFeedbackTransaction(
         val requiredTag = when (draft.selectedMark) {
             LocalMark.FAMILIAR -> CortexResponseTag.FAMILIAR
             LocalMark.FORGET -> CortexResponseTag.FORGET
-            // An APK string alone cannot distinguish UNCERTAIN vs VAGUE.
-            LocalMark.VAGUE -> null
+            // OpLog uses wasm UNCERTAIN (not Cortex JSON VAGUE).
+            LocalMark.VAGUE -> CortexResponseTag.UNCERTAIN
         }
         if (requiredTag == null || draft.responseCandidates != setOf(requiredTag)) {
             return CortexTransactionResult(CortexTransactionStatus.AMBIGUOUS_RESPONSE, false)
