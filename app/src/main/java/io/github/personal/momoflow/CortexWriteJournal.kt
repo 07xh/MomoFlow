@@ -43,7 +43,7 @@ data class CortexWriteEntry(
 }
 
 /**
- * A word is reserved once per China study day and credential pair, regardless
+ * A word is reserved once per China study day and Open API authorization, regardless
  * of selected feedback type. A second click must NOT create a second POST.
  * Persistence uses synchronous commit BEFORE any potentially ambiguous send.
  */
@@ -51,8 +51,11 @@ class CortexWriteJournal(context: Context) {
     private val prefs = context.getSharedPreferences("momoflow_local", Context.MODE_PRIVATE)
 
     fun key(openToken: String, cortexToken: String, day: String, wordId: String): String {
+        require(openToken.isNotBlank() && cortexToken.isNotBlank())
+        // Cortex bearer tokens can rotate. Do NOT make a token refresh create
+        // a new write slot for the same official Open API account and word.
         val digest = MessageDigest.getInstance("SHA-256").digest(
-            (openToken + "\u0000" + cortexToken + "\u0000" + day + "\u0000" + wordId)
+            (openToken + "\u0000" + day + "\u0000" + wordId)
                 .toByteArray(Charsets.UTF_8)
         )
         return digest.joinToString("") { "%02x".format(it.toInt() and 0xff) }
