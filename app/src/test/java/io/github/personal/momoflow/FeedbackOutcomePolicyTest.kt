@@ -23,7 +23,7 @@ class FeedbackOutcomePolicyTest {
         val sample = StudyWord("test-12", "example", 1, false, false)
         assertEquals(setOf(CortexResponseTag.FAMILIAR),
             adapter.draft(sample, LocalMark.FAMILIAR).responseCandidates)
-        assertEquals(setOf(CortexResponseTag.UNCERTAIN, CortexResponseTag.VAGUE),
+        assertEquals(setOf(CortexResponseTag.UNCERTAIN),
             adapter.draft(sample, LocalMark.VAGUE).responseCandidates)
         assertEquals(setOf(CortexResponseTag.FORGET),
             adapter.draft(sample, LocalMark.FORGET).responseCandidates)
