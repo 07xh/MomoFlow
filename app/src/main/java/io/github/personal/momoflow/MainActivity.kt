@@ -360,16 +360,29 @@ class MainActivity : Activity() {
             else "已加密保存 Cortex 授权；可读取检查点。",
             12f, muted
         ))
-        if (snapshot != null && snapshot.words.isNotEmpty()) {
+        val cortexOpenToken = store.token()
+        if (snapshot != null && snapshot.words.isNotEmpty() && cortexOpenToken != null) {
             val current = snapshot.words[store.index().coerceIn(0, snapshot.words.lastIndex)]
-            val token = store.token()
-            val ledger = if (token == null) null else CortexFeedbackLedger(this).current(current.id, token)
-            cortexPane.addView(gap(7))
-            cortexPane.addView(label(
-                if (ledger == null) "当前词：无待确认事务"
-                else "当前词：${ledger.outcome.label} · ${ledger.mark.label}（官方前台反馈回读：${ledger.explanation}）",
-                12f, if (ledger?.outcome == FeedbackOutcome.FAILED) Color.parseColor("#A34A36") else muted
-            ))
+            val ledger = CortexFeedbackLedger(this).current(current.id, cortexOpenToken)
+            if (ledger != null) {
+                cortexPane.addView(gap(7))
+                cortexPane.addView(label(
+                    "当前词：${ledger.mark.label} · ${ledger.outcome.label}", 12f, accent, true
+                ))
+            }
+        }
+        if (cortexOpenToken != null) {
+            val recent = CortexFeedbackLedger(this).recent(cortexOpenToken)
+            if (recent.isNotEmpty()) {
+                cortexPane.addView(gap(8))
+                cortexPane.addView(label("最近反馈", 12f, accent, true))
+                recent.forEach { operation ->
+                    val spelling = operation.spelling.ifBlank { "词条 …${operation.vocId.takeLast(4)}" }
+                    cortexPane.addView(label(
+                        "$spelling · ${operation.mark.label} · ${operation.outcome.label}", 12f, muted
+                    ))
+                }
+            }
         }
         cortexPane.addView(gap(9))
         val legacyTokenEntry = EditText(this).apply {
@@ -482,6 +495,9 @@ class MainActivity : Activity() {
         if (packageManager.getLaunchIntentForPackage(MomoInspectionService.MOMO_PACKAGE) == null) {
             return hint("请先安装官方墨墨背单词 App")
         }
+        if (OfficialTrialStore(this).pending() != null) {
+            return hint("上一笔反馈仍待核对；请先验证或取消，避免丢失原始记录")
+        }
         trialBusy = true
         trialStatus = "正在读取 ${word.spelling} 的操作前官方记录。"
         draw()
@@ -495,7 +511,7 @@ class MainActivity : Activity() {
                 runOnUiThread {
                     if (token != store.token()) { trialBusy = false; trialStatus = "账号已变化，本次验证取消"; draw(); return@runOnUiThread }
                     try {
-                        CortexFeedbackLedger(this).begin(word.id, mark, token)
+                        CortexFeedbackLedger(this).begin(word.id, mark, token, word.spelling)
                     } catch (error: Exception) {
                         trialBusy = false
                         trialStatus = error.message ?: "已有待确认的反馈事务"
