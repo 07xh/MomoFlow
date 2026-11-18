@@ -39,6 +39,8 @@ class MainActivity : Activity() {
     private val accent get() = ui.accent
     private var page = MomoPage.STUDY
     private var showLegacy = false
+    private var showFluidAdvanced = false
+    private var showVerificationDiagnostics = false
     private var cortexRequestRevision = 0
     private var syncing = false
     private var trialBusy = false
@@ -174,17 +176,22 @@ class MainActivity : Activity() {
 
     private fun renderConnections(column: LinearLayout, snapshot: StudySnapshot?) {
         val tokenPane = pane()
-        tokenPane.addView(label("账号连接", 16f, ink, true))
+        tokenPane.addView(label("开放 API · 学习数据", 18f, ink, true))
+        tokenPane.addView(gap(9))
+        tokenPane.addView(ui.status(
+            if (store.token() == null) "未配置" else "凭证已保存 · 通过同步验证",
+            positiveState = store.snapshot()?.let { store.isToday(it) } == true
+        ))
         tokenPane.addView(gap(8))
-        tokenPane.addView(label(if (store.token() == null) "尚未连接墨墨。Token 仅保存在本机加密存储中。" else "已保存个人 Token（不会在界面或日志中显示）", 12f, muted))
+        tokenPane.addView(label("仅用于读取今日单词与核验记录。与 Cortex 凭证相互独立。", 12f, muted))
         tokenPane.addView(gap(12))
         val entry = EditText(this).apply {
             hint = "粘贴墨墨开放 API Token"
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
             textSize = 14f
             setSingleLine(true)
-            background = rounded(Color.parseColor("#F1F6FF"), 12, Color.parseColor("#D8E6F7"))
-            setPadding(dp(12), dp(8), dp(12), dp(8))
+            background = rounded(ui.subtle, 14, ui.border)
+            setPadding(dp(14), dp(8), dp(14), dp(8))
         }
         tokenPane.addView(entry, LinearLayout.LayoutParams(-1, dp(49)))
         tokenPane.addView(gap(10))
@@ -240,30 +247,6 @@ class MainActivity : Activity() {
                     .format(java.util.Date(health.checkedAtMs)), 11f, muted
             ))
         }
-        val cortexOpenToken = store.token()
-        if (snapshot != null && snapshot.words.isNotEmpty() && cortexOpenToken != null) {
-            val current = snapshot.words[store.index().coerceIn(0, snapshot.words.lastIndex)]
-            val ledger = CortexFeedbackLedger(this).current(current.id, cortexOpenToken)
-            if (ledger != null) {
-                cortexPane.addView(gap(7))
-                cortexPane.addView(label(
-                    "当前词：${ledger.mark.label} · ${ledger.outcome.label}", 12f, accent, true
-                ))
-            }
-        }
-        if (cortexOpenToken != null) {
-            val recent = CortexFeedbackLedger(this).recent(cortexOpenToken)
-            if (recent.isNotEmpty()) {
-                cortexPane.addView(gap(8))
-                cortexPane.addView(label("最近反馈", 12f, accent, true))
-                recent.forEach { operation ->
-                    val spelling = operation.spelling.ifBlank { "词条 …${operation.vocId.takeLast(4)}" }
-                    cortexPane.addView(label(
-                        "$spelling · ${operation.mark.label} · ${operation.outcome.label}", 12f, muted
-                    ))
-                }
-            }
-        }
         cortexPane.addView(gap(9))
         cortexPane.addView(label("直接导入 Bearer", 14f, ink, true))
         cortexPane.addView(label("只验证只读接口；成功后加密保存。", 12f, muted))
@@ -289,7 +272,7 @@ class MainActivity : Activity() {
             draw()
         })
         if (showLegacy) {
-        cortexPane.addView(gap(8))
+            cortexPane.addView(gap(8))
         val legacyTokenEntry = EditText(this).apply {
             hint = "旧版登录 Token（仅用于单次交换）"
             setSingleLine(true)
@@ -423,16 +406,16 @@ class MainActivity : Activity() {
 
     private fun renderVerification(column: LinearLayout, snapshot: StudySnapshot?) {
         val trialPane = pane()
-        trialPane.addView(label("墨墨真实回写 · 验证模式", 16f, ink, true))
+        trialPane.addView(label("官方记录核验", 18f, ink, true))
         trialPane.addView(gap(8))
-        trialPane.addView(label("当前为人工提交实验：先记录墨墨官方基线，再在墨墨原 App 完成同一词的反馈，返回后比较官方记录。不会直接向墨墨提交记忆反馈。", 12f, muted))
+        trialPane.addView(label("读取基线 → 在墨墨反馈 → 返回核对。此页不直接写入 Cortex。", 13f, muted))
         val pending = OfficialTrialStore(this).pending()
         if (snapshot != null && snapshot.words.isNotEmpty()) {
             val word = snapshot.words[store.index().coerceIn(0, snapshot.words.lastIndex)]
             trialPane.addView(gap(12))
             trialPane.addView(label("验证墨墨真实反馈 · 当前默认词：${word.spelling}", 13f, ink, true))
             trialPane.addView(gap(6))
-            trialPane.addView(label("可输入墨墨原 App 当前显示的英文词（必须在今日待学词表中）。留空则使用默认词，提交前仍需核对完全一致。", 11f, muted))
+            trialPane.addView(label("可填写原 App 中当前单词；留空使用下方默认词。", 12f, muted))
             trialPane.addView(gap(7))
             val trialSpelling = EditText(this).apply {
                 hint = "墨墨当前单词（英文）"
@@ -445,9 +428,9 @@ class MainActivity : Activity() {
             trialPane.addView(trialSpelling, LinearLayout.LayoutParams(-1, dp(49)))
             trialPane.addView(gap(8))
             trialPane.addView(horizontal(
-                button("认识 · 验证", false) { startTrialForSpelling(snapshot, word, trialSpelling.text.toString(), LocalMark.FAMILIAR) },
-                button("模糊 · 验证", false) { startTrialForSpelling(snapshot, word, trialSpelling.text.toString(), LocalMark.VAGUE) },
-                button("忘记 · 验证", false) { startTrialForSpelling(snapshot, word, trialSpelling.text.toString(), LocalMark.FORGET) }
+                button("认识", false) { startTrialForSpelling(snapshot, word, trialSpelling.text.toString(), LocalMark.FAMILIAR) },
+                button("模糊", false) { startTrialForSpelling(snapshot, word, trialSpelling.text.toString(), LocalMark.VAGUE) },
+                button("忘记", false) { startTrialForSpelling(snapshot, word, trialSpelling.text.toString(), LocalMark.FORGET) }
             ))
             trialPane.addView(gap(10))
             trialPane.addView(button("只读识别墨墨背词页面控件（2 分钟）", false) { inspectMomo(word) })
@@ -476,7 +459,9 @@ class MainActivity : Activity() {
         }
         if (trialBusy) { trialPane.addView(gap(8)); trialPane.addView(label("正在读取官方数据…", 12f, muted)) }
         if (trialStatus.isNotBlank()) {
-            trialPane.addView(gap(8)); trialPane.addView(label(trialStatus, 12f, muted))
+            trialPane.addView(gap(8))
+            trialPane.addView(ui.status(trialStatus,
+                warningState = trialStatus.contains("失败") || trialStatus.contains("无法")))
         }
         val officialReport = OfficialTrialStore(this).lastReport()
         if (officialReport.isNotBlank()) {
@@ -488,6 +473,12 @@ class MainActivity : Activity() {
                 hint("已复制官方只读对照结果；这是状态观察，不代表 MomoFlow 已写回")
             })
         }
+        trialPane.addView(gap(10))
+        trialPane.addView(button(if (showVerificationDiagnostics) "收起诊断工具" else "展开诊断工具", false) {
+            showVerificationDiagnostics = !showVerificationDiagnostics
+            draw()
+        })
+        if (showVerificationDiagnostics) {
         trialPane.addView(gap(8))
         trialPane.addView(label("前台回写尝试：${OfficialForegroundActionStore(this).summary()}", 11f, muted))
         trialPane.addView(gap(5))
@@ -500,9 +491,32 @@ class MainActivity : Activity() {
             )
             hint("已复制脱敏识别结果，可用于真机验收")
         })
+        }
         column.addView(trialPane)
+        renderRecentFeedback(column)
         column.addView(gap(14))
 
+    }
+
+    private fun renderRecentFeedback(column: LinearLayout) {
+        val openToken = store.token() ?: return
+        val recent = CortexFeedbackLedger(this).recent(openToken)
+        if (recent.isEmpty()) return
+        val card = pane()
+        card.addView(label("最近反馈", 17f, ink, true))
+        card.addView(gap(5))
+        card.addView(label("显示官方前台核验事务，不代表 Cortex 后台提交。", 12f, muted))
+        recent.forEach { item ->
+            card.addView(gap(8))
+            val name = item.spelling.ifBlank { "词条 …${item.vocId.takeLast(4)}" }
+            card.addView(ui.status(
+                "$name  ·  ${item.mark.label}  ·  ${item.outcome.label}",
+                positiveState = item.outcome == FeedbackOutcome.SUCCEEDED,
+                warningState = item.outcome == FeedbackOutcome.FAILED
+            ))
+        }
+        column.addView(gap(14))
+        column.addView(card)
     }
 
     private fun renderFluid(column: LinearLayout) {
