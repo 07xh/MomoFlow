@@ -38,6 +38,22 @@ enum class CortexResponseTag(val protoName: String) {
 }
 
 /**
+ * Keep these two distinct; equal display labels do not imply equal wire enums.
+ * Values are intentionally not assigned until runtime getNumber() evidence.
+ */
+enum class CortexWasmFeedback(val protoName: String) {
+    FAMILIAR("RESPONSE_FAMILIAR"),
+    UNCERTAIN("RESPONSE_UNCERTAIN"),
+    FORGET("RESPONSE_FORGET"),
+}
+
+enum class CortexModelFeedback(val protoName: String) {
+    FAMILIAR("RESPONSE_FAMILIAR"),
+    VAGUE("RESPONSE_VAGUE"),
+    FORGET("RESPONSE_FORGET"),
+}
+
+/**
  * Local intent only: no checkpoint, token, request body, signature or HTTP
  * transaction is fabricated from incomplete APK strings.
  */
@@ -46,6 +62,20 @@ data class CortexFeedbackDraft(
     val selectedMark: LocalMark,
     val responseCandidates: Set<CortexResponseTag>,
 ) {
+    val wasmFeedback: CortexWasmFeedback
+        get() = when (selectedMark) {
+            LocalMark.FAMILIAR -> CortexWasmFeedback.FAMILIAR
+            LocalMark.VAGUE -> CortexWasmFeedback.UNCERTAIN
+            LocalMark.FORGET -> CortexWasmFeedback.FORGET
+        }
+
+    val cortexReadbackFeedback: CortexModelFeedback
+        get() = when (selectedMark) {
+            LocalMark.FAMILIAR -> CortexModelFeedback.FAMILIAR
+            LocalMark.VAGUE -> CortexModelFeedback.VAGUE
+            LocalMark.FORGET -> CortexModelFeedback.FORGET
+        }
+
     init {
         require(vocId.isNotBlank()) { "单词 ID 不能为空" }
         require(responseCandidates.isNotEmpty()) { "反馈枚举候选不能为空" }
@@ -86,9 +116,10 @@ class CortexStudyAdapter {
         require(word.id.isNotBlank()) { "单词 ID 不能为空" }
         val choices = when (mark) {
             LocalMark.FAMILIAR -> setOf(CortexResponseTag.FAMILIAR)
-            // The APK contains both UNCERTAIN and VAGUE; the actual UI
-            // mapping has NOT been established by a runtime trace.
-            LocalMark.VAGUE -> setOf(CortexResponseTag.UNCERTAIN, CortexResponseTag.VAGUE)
+            // A distinct wasm enum has UNCERTAIN while the Cortex JSON model
+            // has VAGUE. Use the wasm NAME only here; numeric value still
+            // requires a real on-device runtime capture.
+            LocalMark.VAGUE -> setOf(CortexResponseTag.UNCERTAIN)
             LocalMark.FORGET -> setOf(CortexResponseTag.FORGET)
         }
         return CortexFeedbackDraft(word.id, mark, choices)

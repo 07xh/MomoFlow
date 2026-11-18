@@ -52,5 +52,10 @@ class OfficialTrialStore(context: Context) {
 
     fun lastReport(): String = prefs.getString("official_trial_report", "") ?: ""
 
+    /** Release a verified or conflicting trial without erasing its readback report. */
+    fun finish() {
+        check(prefs.edit().remove("official_trial").commit()) { "无法结束本次官方核验" }
+    }
+
     fun clear() { prefs.edit().remove("official_trial").remove("official_trial_report").apply() }
 }

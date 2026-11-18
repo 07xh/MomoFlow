@@ -26,11 +26,14 @@ data class FeedbackOperation(
     val accountDigest: String,
     val outcome: FeedbackOutcome,
     val explanation: String,
+    val spelling: String = "",
+    val createdAtMs: Long = 0,
 ) {
     fun toJson(): JSONObject = JSONObject()
         .put("id", id).put("voc_id", vocId).put("mark", mark.wire)
         .put("day", day).put("account_digest", accountDigest)
         .put("outcome", outcome.name).put("explanation", explanation)
+        .put("spelling", spelling).put("created_at_ms", createdAtMs)
 
     companion object {
         fun parse(o: JSONObject) = FeedbackOperation(
@@ -39,6 +42,7 @@ data class FeedbackOperation(
             o.getString("day"), o.getString("account_digest"),
             FeedbackOutcome.valueOf(o.getString("outcome")),
             o.optString("explanation"),
+            o.optString("spelling"), o.optLong("created_at_ms", 0),
         )
     }
 }
@@ -71,14 +75,15 @@ class CortexFeedbackLedger(context: Context) {
      * original is unresolved; a different mark must be cancelled first.
      */
     @Synchronized
-    fun begin(vocId: String, mark: LocalMark, openApiToken: String): FeedbackOperation {
+    fun begin(vocId: String, mark: LocalMark, openApiToken: String, spelling: String = ""): FeedbackOperation {
         val existing = current(vocId, openApiToken)
         check(existing?.outcome != FeedbackOutcome.PENDING) {
             "该单词已有待确认反馈，请先核验或取消，不能重复发起"
         }
         val operation = FeedbackOperation(
             UUID.randomUUID().toString(), vocId, mark, StudyDay.today(),
-            digest(openApiToken), FeedbackOutcome.PENDING, "已建立基线，等待墨墨官方记录回读"
+            digest(openApiToken), FeedbackOutcome.PENDING, "已建立基线，等待墨墨官方记录回读",
+            spelling = spelling.take(90), createdAtMs = System.currentTimeMillis()
         )
         check(prefs.edit().putString(key(vocId), operation.toJson().toString()).commit()) {
             "无法保存反馈事务，未执行任何操作"
@@ -99,6 +104,21 @@ class CortexFeedbackLedger(context: Context) {
         )
         check(prefs.edit().putString(key(vocId), updated.toJson().toString()).commit())
         return updated
+    }
+
+    /** Recent current-account operations; includes words no longer in today's unfinished list. */
+    @Synchronized
+    fun recent(openApiToken: String, limit: Int = 5): List<FeedbackOperation> {
+        val account = digest(openApiToken)
+        val day = StudyDay.today()
+        return prefs.all.filterKeys { it.startsWith("operation.") }
+            .values.mapNotNull { raw ->
+                try { FeedbackOperation.parse(JSONObject(raw as String)) }
+                catch (_: Exception) { null }
+            }
+            .filter { it.day == day && it.accountDigest == account }
+            .sortedByDescending { it.createdAtMs }
+            .take(limit.coerceIn(0, 20))
     }
 
     @Synchronized

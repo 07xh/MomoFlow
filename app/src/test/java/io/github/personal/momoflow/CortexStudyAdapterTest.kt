@@ -31,10 +31,13 @@ class CortexStudyAdapterTest {
         assertEquals(LocalMark.FAMILIAR, known.selectedMark)
         assertEquals(setOf(CortexResponseTag.FAMILIAR), known.responseCandidates)
         assertEquals(
-            setOf(CortexResponseTag.UNCERTAIN, CortexResponseTag.VAGUE),
+            setOf(CortexResponseTag.UNCERTAIN),
             vague.responseCandidates
         )
         assertEquals(setOf(CortexResponseTag.FORGET), forgotten.responseCandidates)
+        assertEquals(CortexWasmFeedback.UNCERTAIN, vague.wasmFeedback)
+        assertEquals(CortexModelFeedback.VAGUE, vague.cortexReadbackFeedback)
+        assertNotEquals(vague.wasmFeedback.protoName, vague.cortexReadbackFeedback.protoName)
         assertEquals("RESPONSE_FAMILIAR", CortexResponseTag.FAMILIAR.protoName)
         assertEquals("RESPONSE_FORGET", CortexResponseTag.FORGET.protoName)
     }

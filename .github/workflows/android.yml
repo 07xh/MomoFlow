@@ -51,6 +51,9 @@ jobs:
       - name: Cortex protobuf wire structural tests
         run: python3 -m unittest discover -s tools -p 'test_cortex_wire_schema.py' -v
 
+      - name: Cortex paired runtime contract tests
+        run: python3 -m unittest discover -s tools -p 'test_cortex_contract_from_trace.py' -v
+
       - name: Generate bundled ECDICT definitions
         id: dictionary
         run: python3 tools/build_dictionary.py

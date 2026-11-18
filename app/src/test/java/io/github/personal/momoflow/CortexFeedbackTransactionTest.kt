@@ -36,17 +36,17 @@ class CortexFeedbackTransactionTest {
         assertEquals(1, sends)
     }
 
-    @Test fun ambiguousVagueNeverEntersTransport() {
+    @Test fun vagueUsesSeparateWasmUncertainEnum() {
         var sends = 0
         val tx = CortexFeedbackTransaction(
             CortexOfficialReader { before },
             CortexAuthorizedSender { _, _ -> sends++; CortexDispatchVerdict.ACCEPTED_UNVERIFIED }
         )
         assertEquals(
-            CortexTransactionStatus.AMBIGUOUS_RESPONSE,
+            CortexTransactionStatus.READBACK_PENDING,
             tx.run(adapter.draft(word, LocalMark.VAGUE), "op-b") { true }.status
         )
-        assertEquals(0, sends)
+        assertEquals(1, sends)
     }
 
     @Test fun mismatchedBaselineBlocksWithoutNetworkAttempt() {
