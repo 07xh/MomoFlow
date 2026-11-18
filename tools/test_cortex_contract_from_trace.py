@@ -79,7 +79,7 @@ class CortexEvidenceTests(unittest.TestCase):
 
     def test_rejects_truncated_protobuf(self):
         s = example()
-        val = base64.b64encode(b"\\x82\\x80").decode()
+        val = base64.b64encode(bytes([0x82, 0x80])).decode()
         s["samples"][0]["oplog_b64"] = val
         s["samples"][0]["http_body"]["oplog"] = val
         with self.assertRaises(EvidenceError):
