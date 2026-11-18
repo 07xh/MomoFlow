@@ -39,6 +39,8 @@ class MainActivity : Activity() {
     private var syncing = false
     private var trialBusy = false
     private var trialStatus = ""
+    private var cortexBusy = false
+    private var cortexStatus = ""
     private var queryingWordId: String? = null
     private var message: String = ""
 
@@ -305,8 +307,9 @@ class MainActivity : Activity() {
             trialPane.addView(horizontal(
                 button(if (trialBusy) "核对中…" else "验证官方记录") { verifyOfficialTrial() },
                 button("取消本次验证", false) {
+                    store.token()?.let { CortexFeedbackLedger(this).cancel(pending.wordId, it) }
                     OfficialTrialStore(this).clear()
-                    trialStatus = "已取消验证，未向墨墨提交任何操作。"
+                    trialStatus = "已取消本次验证；事务记为已失败，没有确认官方写回。"
                     draw()
                 }
             ))
@@ -338,6 +341,68 @@ class MainActivity : Activity() {
             hint("已复制脱敏识别结果，可用于真机验收")
         })
         column.addView(trialPane)
+        column.addView(gap(14))
+
+        // Cortex connectivity and persisted result are independent of the
+        // existing notification and foreground action path.
+        val cortexPane = pane()
+        cortexPane.addView(label("Cortex 连接与三态结果", 16f, ink, true))
+        cortexPane.addView(gap(6))
+        val cortexCredentials = CortexCredentialStore(this)
+        cortexPane.addView(label(
+            if (cortexCredentials.accessToken() == null)
+                "尚未配置 Cortex 授权（与开放 API Token 独立）。"
+            else "已加密保存 Cortex 授权；可读取检查点。",
+            12f, muted
+        ))
+        if (snapshot != null && snapshot.words.isNotEmpty()) {
+            val current = snapshot.words[store.index().coerceIn(0, snapshot.words.lastIndex)]
+            val token = store.token()
+            val ledger = if (token == null) null else CortexFeedbackLedger(this).current(current.id, token)
+            cortexPane.addView(gap(7))
+            cortexPane.addView(label(
+                if (ledger == null) "当前词：无待确认事务"
+                else "当前词：${ledger.outcome.label} · ${ledger.mark.label}（${ledger.explanation}）",
+                12f, if (ledger?.outcome == FeedbackOutcome.FAILED) Color.parseColor("#A34A36") else muted
+            ))
+        }
+        cortexPane.addView(gap(9))
+        val legacyTokenEntry = EditText(this).apply {
+            hint = "旧版登录 Token（仅用于单次交换）"
+            setSingleLine(true)
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            textSize = 13f
+            background = rounded(Color.parseColor("#F1F6FF"), 12, Color.parseColor("#D8E6F7"))
+            setPadding(dp(12), dp(8), dp(12), dp(8))
+        }
+        cortexPane.addView(legacyTokenEntry, LinearLayout.LayoutParams(-1, dp(46)))
+        cortexPane.addView(gap(7))
+        val exchangeButton = button("交换并加密保存 Cortex 授权", false) {
+            val submittedToken = legacyTokenEntry.text.toString()
+            legacyTokenEntry.text.clear()
+            exchangeCortex(submittedToken)
+        }
+        exchangeButton.isEnabled = !cortexBusy
+        cortexPane.addView(exchangeButton)
+        cortexPane.addView(gap(7))
+        cortexPane.addView(horizontal(
+            button("检查连接与检查点", false) { inspectCortex() },
+            button("清除 Cortex 授权", false) {
+                cortexCredentials.clear()
+                cortexStatus = "Cortex 授权已清除"
+                draw()
+            }
+        ))
+        if (cortexStatus.isNotBlank()) {
+            cortexPane.addView(gap(7))
+            cortexPane.addView(label(cortexStatus, 12f, muted))
+        }
+        cortexPane.addView(gap(6))
+        cortexPane.addView(label(
+            "已接入授权交换和只读同步检查；Cortex 直接上传仍需真实字段号及同词回读验证。原有前台反馈可以继续使用。",
+            11f, muted
+        ))
+        column.addView(cortexPane)
         column.addView(gap(14))
 
         val toolsPane = pane()
@@ -424,6 +489,14 @@ class MainActivity : Activity() {
                     ?: throw ApiException("官方今日列表未返回该词；请先在墨墨完成当天初始化并重新同步")
                 runOnUiThread {
                     if (token != store.token()) { trialBusy = false; trialStatus = "账号已变化，本次验证取消"; draw(); return@runOnUiThread }
+                    try {
+                        CortexFeedbackLedger(this).begin(word.id, mark, token)
+                    } catch (error: Exception) {
+                        trialBusy = false
+                        trialStatus = error.message ?: "已有待确认的反馈事务"
+                        draw()
+                        return@runOnUiThread
+                    }
                     OfficialTrialStore(this).clear()
                     OfficialForegroundActionStore(this).clear()
                     OfficialTrialStore(this).save(OfficialWritebackTrial(
@@ -468,8 +541,12 @@ class MainActivity : Activity() {
                 runOnUiThread {
                     if (token != store.token()) { trialBusy = false; trialStatus = "账号已变化，不可比较"; draw(); return@runOnUiThread }
                     trialBusy = false
-                    trialStatus = OfficialSyncAssessment.explain(
+                    val evaluation = OfficialSyncAssessment.evaluate(
                         trial.before, current, trial.beforeToday, currentToday, trial.expected
+                    )
+                    trialStatus = evaluation.message
+                    CortexFeedbackLedger(this).recordReadback(
+                        trial.wordId, token, evaluation.status, trialStatus
                     )
                     OfficialTrialStore(this).saveReport(trialStatus)
                     draw()
@@ -478,6 +555,58 @@ class MainActivity : Activity() {
                 runOnUiThread {
                     trialBusy = false
                     trialStatus = "验证请求失败：${error.message ?: "网络异常"}。不能认定已回写。"
+                    draw()
+                }
+            }
+        }.start()
+    }
+
+    private fun exchangeCortex(legacyToken: String) {
+        if (cortexBusy) return
+        if (legacyToken.isBlank()) return hint("请填写本人旧版登录 Token；不能自动把开放 API Token 当作 Cortex 登录凭证")
+        cortexBusy = true
+        cortexStatus = "正在交换 Cortex 授权…"
+        draw()
+        Thread {
+            try {
+                val access = CortexGatewayService().exchangeLegacyToken(legacyToken)
+                CortexCredentialStore(this).saveAccessToken(access)
+                runOnUiThread {
+                    cortexBusy = false
+                    cortexStatus = "Cortex 授权交换成功，已独立加密存储；尚未执行任何写回"
+                    draw()
+                }
+            } catch (error: Exception) {
+                runOnUiThread {
+                    cortexBusy = false
+                    cortexStatus = "授权交换未完成：${error.message ?: "网络异常"}"
+                    draw()
+                }
+            }
+        }.start()
+    }
+
+    private fun inspectCortex() {
+        if (cortexBusy) return
+        val access = CortexCredentialStore(this).accessToken()
+            ?: return hint("请先配置 Cortex 授权")
+        cortexBusy = true
+        cortexStatus = "正在检查 Cortex 服务…"
+        draw()
+        Thread {
+            try {
+                val gateway = CortexGatewayService()
+                gateway.checkpoints(access)
+                gateway.overview(access)
+                runOnUiThread {
+                    cortexBusy = false
+                    cortexStatus = "Cortex 授权、检查点与概览接口读取成功（只读）；这不代表反馈已写入"
+                    draw()
+                }
+            } catch (error: Exception) {
+                runOnUiThread {
+                    cortexBusy = false
+                    cortexStatus = "Cortex 读取失败：${error.message ?: "网络异常"}"
                     draw()
                 }
             }
