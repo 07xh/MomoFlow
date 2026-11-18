@@ -102,6 +102,11 @@ class CortexFeedbackLedger(context: Context) {
     }
 
     @Synchronized
+    fun clear() {
+        check(prefs.edit().clear().commit()) { "无法清理旧账号的 Cortex 反馈事务" }
+    }
+
+    @Synchronized
     fun cancel(vocId: String, openApiToken: String) {
         val existing = current(vocId, openApiToken) ?: return
         if (existing.outcome != FeedbackOutcome.PENDING) return
