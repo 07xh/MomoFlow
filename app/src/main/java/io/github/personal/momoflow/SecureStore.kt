@@ -50,6 +50,55 @@ class SecureStore(context: Context) {
     }
 
     fun forgetToken() { prefs.edit().remove("token_iv").remove("token_data").apply() }
+    /**
+     * Cortex is a separate authorization domain. Never silently reuse the
+     * public Open API token for a private Cortex request.
+     */
+    fun saveCortexToken(value: String) {
+        require(value.isNotBlank())
+        val cortexAlias = "momoflow_cortex_token_key_v1"
+        val keystore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        if (!keystore.containsAlias(cortexAlias)) {
+            val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
+            generator.init(KeyGenParameterSpec.Builder(
+                cortexAlias, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
+            ).setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                .setKeySize(256).build())
+            generator.generateKey()
+        }
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.ENCRYPT_MODE, keystore.getKey(cortexAlias, null))
+        val cipherText = cipher.doFinal(value.trim().toByteArray(Charsets.UTF_8))
+        check(prefs.edit()
+            .putString("cortex.token.iv", Base64.encodeToString(cipher.iv, b64flags))
+            .putString("cortex.token.data", Base64.encodeToString(cipherText, b64flags))
+            .commit()) { "Cortex credential could not be persisted" }
+    }
+
+    fun cortexToken(): String? {
+        val iv = prefs.getString("cortex.token.iv", null) ?: return null
+        val data = prefs.getString("cortex.token.data", null) ?: return null
+        return try {
+            val keystore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+            val key = keystore.getKey("momoflow_cortex_token_key_v1", null) ?: return null
+            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+            cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(128, Base64.decode(iv, b64flags)))
+            String(cipher.doFinal(Base64.decode(data, b64flags)), Charsets.UTF_8)
+        } catch (_: Exception) { null }
+    }
+
+    fun forgetCortexToken() {
+        prefs.edit().remove("cortex.token.iv").remove("cortex.token.data")
+            .putBoolean("cortex.direct.enabled", false).commit()
+    }
+
+    fun cortexDirectEnabled(): Boolean = prefs.getBoolean("cortex.direct.enabled", false)
+    fun setCortexDirectEnabled(value: Boolean) {
+        check(prefs.edit().putBoolean("cortex.direct.enabled", value).commit())
+    }
+
+
     fun saveSnapshot(snapshot: StudySnapshot) {
         // Do not jump back to the first card after every refresh.
         val old = snapshot()?.words?.getOrNull(index())?.id
