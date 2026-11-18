@@ -83,11 +83,10 @@ class CortexFeedbackTransaction(
         isSameAccount: () -> Boolean,
     ): CortexTransactionResult {
         require(operationId.isNotBlank()) { "操作 ID 不能为空" }
-        val requiredTag = when (draft.selectedMark) {
-            LocalMark.FAMILIAR -> CortexResponseTag.FAMILIAR
-            LocalMark.FORGET -> CortexResponseTag.FORGET
-            // OpLog uses wasm UNCERTAIN (not Cortex JSON VAGUE).
-            LocalMark.VAGUE -> CortexResponseTag.UNCERTAIN
+        val requiredTag = when (draft.wasmFeedback) {
+            CortexWasmFeedback.FAMILIAR -> CortexResponseTag.FAMILIAR
+            CortexWasmFeedback.UNCERTAIN -> CortexResponseTag.UNCERTAIN
+            CortexWasmFeedback.FORGET -> CortexResponseTag.FORGET
         }
         if (requiredTag == null || draft.responseCandidates != setOf(requiredTag)) {
             return CortexTransactionResult(CortexTransactionStatus.AMBIGUOUS_RESPONSE, false)
