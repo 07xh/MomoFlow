@@ -37,10 +37,8 @@ class CortexHttpTransport(private val bearerToken: String, private val profile: 
      * A response 2xx is transport acceptance, not a verified account update.
      * Even after a socket exception, NEVER automatically send again.
      */
-    fun submitOnce(vocId: Long, mark: LocalMark): CortexDispatchVerdict {
-        val checkpoint = try { readCheckpoint() }
-        catch (_: Exception) { null }
-        if (checkpoint == null) return CortexDispatchVerdict.NOT_CONFIGURED
+    fun submitOnce(vocId: Long, mark: LocalMark, checkpoint: Long): CortexDispatchVerdict {
+        require(checkpoint >= 0L) { "Invalid checkpoint must not be uploaded" }
         val payload = JSONObject()
             .put("checkpoint", checkpoint)
             .put("oplog", CortexWireCodec.encodeBase64(vocId, mark, profile.numbers))
