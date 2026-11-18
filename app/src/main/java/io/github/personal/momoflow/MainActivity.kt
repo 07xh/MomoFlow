@@ -37,6 +37,8 @@ class MainActivity : Activity() {
     private val muted = Color.parseColor("#667D9B")
     private val accent = Color.parseColor("#2563C8")
     private var syncing = false
+    private var cortexBusy = false
+    private var cortexStatus = ""
     private var trialBusy = false
     private var trialStatus = ""
     private var queryingWordId: String? = null
@@ -84,7 +86,11 @@ class MainActivity : Activity() {
             hint("正在读取上一次验证的基线，请勿重复点击")
             return
         }
-        startOfficialTrial(selected.word, selected.expected, autoAttempt = store.autoFeedbackEnabled())
+        if (CortexFeedbackService(this).ready()) {
+            startCortexFeedback(selected.word, selected.expected)
+        } else {
+            startOfficialTrial(selected.word, selected.expected, autoAttempt = store.autoFeedbackEnabled())
+        }
     }
 
     override fun onResume() {
@@ -167,6 +173,7 @@ class MainActivity : Activity() {
                 try {
                     LiveWordNotification.stop(this)
                     store.clearStudyData() // no cross-account vocabulary leakage
+                    store.forgetCortexToken() // never carry Cortex auth to a new Open API account
                     store.saveToken(token)
                     WordWidget.updateAll(this)
                     message = "Token 已保存，请点击同步；今天需先在墨墨 App 完成初始化。"
@@ -175,7 +182,7 @@ class MainActivity : Activity() {
             },
             button("清除授权", false) {
                 LiveWordNotification.stop(this)
-                store.forgetToken(); store.clearStudyData(); message = "授权与学习缓存已清除"; draw()
+                store.forgetToken(); store.forgetCortexToken(); store.clearStudyData(); message = "所有授权与学习缓存已清除"; draw()
                 WordWidget.updateAll(this)
             }
         ))
@@ -340,10 +347,122 @@ class MainActivity : Activity() {
         column.addView(trialPane)
         column.addView(gap(14))
 
+        val cortexPane = pane()
+        cortexPane.addView(label("Cortex 独立写回 · 受控实验", 16f, ink, true))
+        cortexPane.addView(gap(7))
+        val evidenceStore = CortexEvidenceStore(this)
+        val profileReady = evidenceStore.verified() != null
+        cortexPane.addView(label(
+            "协议样本：" + (if (profileReady) "三档结构已本机比对" else "未通过三档真实样本校验") +
+                " · 独立授权：" + (if (store.cortexToken() != null) "已加密保存" else "缺少") +
+                " · 直连：" + (if (store.cortexDirectEnabled()) "已主动启用" else "关闭"),
+            12f, muted
+        ))
+        cortexPane.addView(gap(7))
+        cortexPane.addView(label("Cortex 与开放 API 使用独立 Token。请勿在报告、截图或 GitHub 中发布 Token。协议未经真实样本核验时不会发起 POST。", 11f, muted))
+        cortexPane.addView(gap(8))
+        val cortexTokenField = EditText(this).apply {
+            hint = "粘贴本人 Cortex Bearer Token（仅本机 Keystore）"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            setSingleLine(true); textSize = 13f
+            background = rounded(Color.parseColor("#F1F6FF"), 12)
+            setPadding(dp(10), dp(8), dp(10), dp(8))
+        }
+        cortexPane.addView(cortexTokenField, LinearLayout.LayoutParams(-1, dp(48)))
+        cortexPane.addView(gap(7))
+        cortexPane.addView(horizontal(
+            button("保存 Cortex 授权", false) {
+                val value = cortexTokenField.text.toString().trim()
+                if (value.isBlank()) return@button hint("Token 不能为空")
+                try {
+                    store.setCortexDirectEnabled(false)
+                    store.saveCortexToken(value)
+                    cortexStatus = "独立授权已加密保存。直连默认关闭。"
+                    draw()
+                } catch (_: Exception) { hint("保存 Cortex 授权失败") }
+            },
+            button("清除 Cortex 授权", false) {
+                store.forgetCortexToken()
+                cortexStatus = "已清除独立 Cortex 授权；原有开放 API 与前台反馈仍可用。"
+                draw()
+            }
+        ))
+        cortexPane.addView(gap(7))
+        cortexPane.addView(label("协议样本只在本机校验，需包含三种实际请求的 protobuf 与完整 JSON 外壳。不会将样本原文存储到配置中。", 11f, muted))
+        val traceField = EditText(this).apply {
+            hint = "粘贴本机三档脱敏协议证据 JSON（不含授权头）"
+            minLines = 2; maxLines = 4; textSize = 12f
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
+            background = rounded(Color.parseColor("#F1F6FF"), 12)
+            setPadding(dp(10), dp(8), dp(10), dp(8))
+        }
+        cortexPane.addView(gap(5))
+        cortexPane.addView(traceField, LinearLayout.LayoutParams(-1, dp(78)))
+        cortexPane.addView(gap(7))
+        cortexPane.addView(button("本机校验三档协议样本", false) {
+            try {
+                evidenceStore.importFromLocalTrace(traceField.text.toString())
+                store.setCortexDirectEnabled(false)
+                traceField.text?.clear()
+                cortexStatus = "三档字节和 JSON 外壳已匹配；这不代表服务端已经接受或真机写回成功。"
+                draw()
+            } catch (_: Exception) {
+                hint("样本不完整或编码不一致，保持禁止直连。请核对真实请求和字段编号。")
+            }
+        })
+        cortexPane.addView(gap(7))
+        cortexPane.addView(button("撤销本机协议验证", false) {
+            evidenceStore.clear()
+            cortexStatus = "已清除协议配置，所有 Cortex POST 自动阻止。"
+            LiveWordNotification.publish(this)
+            draw()
+        })
+        cortexPane.addView(gap(8))
+        cortexPane.addView(button(
+            if (store.cortexDirectEnabled()) "关闭 Cortex 直连" else "开启 Cortex 直连（仅本人账号）",
+            false
+        ) {
+            if (store.cortexDirectEnabled()) {
+                store.setCortexDirectEnabled(false)
+            } else if (evidenceStore.verified() != null && store.cortexToken() != null && store.token() != null) {
+                store.setCortexDirectEnabled(true)
+            } else return@button hint("缺少已校验协议、开放 API Token 或独立 Cortex Token")
+            LiveWordNotification.publish(this)
+            draw()
+        })
+        cortexPane.addView(gap(7))
+        cortexPane.addView(label("开启后通知三档按钮优先走受控 Cortex 服务；关闭或缺证据时完全沿用原来的墨墨前台反馈。每词每日最多一次，超时不重发。", 11f, muted))
+        cortexPane.addView(gap(8))
+        cortexPane.addView(button("只回读上次 Cortex 操作（不重发）", false) {
+            if (cortexBusy) return@button
+            cortexBusy = true
+            Thread {
+                val outcome = try { CortexFeedbackService(applicationContext).reconcileLatest() }
+                    catch (_: Exception) { CortexWriteOutcome(CortexWriteState.PENDING,
+                        "回读出错，未重新提交；可稍后再次回读。") }
+                runOnUiThread { cortexBusy = false; cortexStatus = outcome.message; draw() }
+            }.start()
+        })
+        val previousCortex = CortexFeedbackService(this).latestState()
+        if (previousCortex != null) {
+            cortexPane.addView(gap(8))
+            cortexPane.addView(label("最近操作 · " + when (previousCortex.state) {
+                CortexWriteState.PENDING -> "待确认"
+                CortexWriteState.SUCCESS -> "已成功（官方匹配）"
+                CortexWriteState.FAILED -> "已失败"
+            } + "：" + previousCortex.message, 12f, muted))
+        }
+        if (cortexStatus.isNotBlank()) {
+            cortexPane.addView(gap(8))
+            cortexPane.addView(label(cortexStatus, 12f, muted))
+        }
+        column.addView(cortexPane)
+        column.addView(gap(14))
+
         val toolsPane = pane()
         toolsPane.addView(label("流体云与快捷入口", 16f, ink, true))
         toolsPane.addView(gap(6))
-        toolsPane.addView(label("通知三档按钮可选启用“墨墨前台单次反馈”。这是由墨墨自身处理的前台操作，并非未公开接口或纯后台写入；官方完成情况以回读为准。", 11f, muted))
+        toolsPane.addView(label("通知三档按钮默认走墨墨原 App 前台单次反馈或人工验证；只有单独授权并核对三档真实协议样本后，才优先走 Cortex 独立服务。两条路径都以官方回读为准。", 11f, muted))
         toolsPane.addView(gap(8))
         toolsPane.addView(button(if (store.autoFeedbackEnabled()) "关闭前台自动反馈" else "开启前台自动反馈（主动授权）", false) {
             val enable = !store.autoFeedbackEnabled()
@@ -386,7 +505,26 @@ class MainActivity : Activity() {
         toolsPane.addView(button("复制设备兼容性诊断（不含 Token）", false) { copyDiagnostics() })
         column.addView(toolsPane)
         column.addView(gap(16))
-        column.addView(label("开放 API 用于读取与回验；可选无障碍服务在明确授权的前台同词场景只尝试点击一次，不改变其他 App、不读取账号资料。无需 Root。", 11f, muted))
+        column.addView(label("开放 API 仅用于读取与回验；前台同词单次点击保留。Cortex 实验直连须另行授权并通过协议验证，默认关闭；不将 HTTP 成功视为学习完成。", 11f, muted))
+    }
+
+    private fun startCortexFeedback(word: StudyWord, mark: LocalMark) {
+        if (cortexBusy) return hint("Cortex 正在执行上一次操作，请勿重复触发")
+        cortexBusy = true
+        cortexStatus = "正在读取官方基线、登记唯一操作并检查 Cortex 同步状态…"
+        draw()
+        Thread {
+            val outcome = try { CortexFeedbackService(applicationContext).submit(word, mark) }
+                catch (_: Exception) { CortexWriteOutcome(CortexWriteState.PENDING,
+                    "服务运行异常：结果可能不确定，禁止重发；请仅回读上次操作。") }
+            runOnUiThread {
+                cortexBusy = false
+                cortexStatus = outcome.message
+                draw()
+                // Do not optimistically advance the word or local official progress.
+                LiveWordNotification.publish(this)
+            }
+        }.start()
     }
 
     private fun startTrialForSpelling(snapshot: StudySnapshot, fallback: StudyWord, input: String, mark: LocalMark) {
