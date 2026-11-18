@@ -170,11 +170,11 @@ class MainActivity : Activity() {
             MomoPage.STUDY -> renderStudy(column, snapshot)
             MomoPage.FLUID -> renderFluid(column)
             MomoPage.VERIFY -> renderVerification(column, snapshot)
-            MomoPage.CONNECTIONS -> renderConnections(column, snapshot)
+            MomoPage.CONNECTIONS -> renderConnections(column)
         }
     }
 
-    private fun renderConnections(column: LinearLayout, snapshot: StudySnapshot?) {
+    private fun renderConnections(column: LinearLayout) {
         val tokenPane = pane()
         tokenPane.addView(label("开放 API · 学习数据", 18f, ink, true))
         tokenPane.addView(gap(9))
@@ -205,6 +205,7 @@ class MainActivity : Activity() {
                     LiveWordNotification.stop(this)
                     store.clearStudyData() // no cross-account vocabulary leakage
                     cortexRequestRevision++
+                    cortexBusy = false
                     CortexCredentialStore(this).clear()
                     CortexAuthHealthStore(this).clear()
                     CortexFeedbackLedger(this).clear()
@@ -218,6 +219,7 @@ class MainActivity : Activity() {
                 LiveWordNotification.stop(this)
                 store.forgetToken(); store.clearStudyData()
                 cortexRequestRevision++
+                cortexBusy = false
                 CortexCredentialStore(this).clear()
                 CortexAuthHealthStore(this).clear()
                 CortexFeedbackLedger(this).clear()
@@ -275,23 +277,23 @@ class MainActivity : Activity() {
         })
         if (showLegacy) {
             cortexPane.addView(gap(8))
-        val legacyTokenEntry = EditText(this).apply {
-            hint = "旧版登录 Token（仅用于单次交换）"
-            setSingleLine(true)
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
-            textSize = 13f
-            background = rounded(ui.subtle, 14, ui.border)
-            setPadding(dp(12), dp(8), dp(12), dp(8))
-        }
-        cortexPane.addView(legacyTokenEntry, LinearLayout.LayoutParams(-1, dp(46)))
-        cortexPane.addView(gap(7))
-        val exchangeButton = button("交换并加密保存 Cortex 授权", false) {
-            val submittedToken = legacyTokenEntry.text.toString()
-            legacyTokenEntry.text.clear()
-            exchangeCortex(submittedToken)
-        }
-        exchangeButton.isEnabled = !cortexBusy
-        cortexPane.addView(exchangeButton)
+            val legacyTokenEntry = EditText(this).apply {
+                hint = "旧版登录 Token（仅用于单次交换）"
+                setSingleLine(true)
+                inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+                textSize = 13f
+                background = rounded(ui.subtle, 14, ui.border)
+                setPadding(dp(12), dp(8), dp(12), dp(8))
+            }
+            cortexPane.addView(legacyTokenEntry, LinearLayout.LayoutParams(-1, dp(46)))
+            cortexPane.addView(gap(7))
+            val exchangeButton = button("交换并加密保存 Cortex 授权", false) {
+                val submittedToken = legacyTokenEntry.text.toString()
+                legacyTokenEntry.text.clear()
+                exchangeCortex(submittedToken)
+            }
+            exchangeButton.isEnabled = !cortexBusy
+            cortexPane.addView(exchangeButton)
         }
         cortexPane.addView(gap(12))
         cortexPane.addView(button("检查 Cortex 只读连接", false) { inspectCortex() }.apply {
@@ -300,6 +302,7 @@ class MainActivity : Activity() {
         cortexPane.addView(gap(7))
         cortexPane.addView(button("清除 Cortex 凭证与核验状态", false) {
             cortexRequestRevision++
+            cortexBusy = false
             cortexCredentials.clear()
             CortexAuthHealthStore(this).clear()
             cortexStatus = "已清除 Cortex 凭证和上次核验记录"
