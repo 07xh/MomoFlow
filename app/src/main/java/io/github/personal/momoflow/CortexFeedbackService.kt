@@ -58,13 +58,21 @@ class CortexFeedbackService(context: Context) {
                 ?: failed("该词操作已被保留，不允许重复提交")
         }
         // The reservation is durably committed BEFORE any possible POST.
-        val verdict = try { CortexHttpTransport(cortex, profile).submitOnce(numericId, mark) }
-        catch (_: Exception) { CortexDispatchVerdict.OUTCOME_UNKNOWN }
-        if (verdict == CortexDispatchVerdict.NOT_CONFIGURED) {
-            // Checkpoint read failed BEFORE any POST was opened.
+        val transport = CortexHttpTransport(cortex, profile)
+        val checkpoint = try { transport.readCheckpoint() } catch (_: Exception) { null }
+        if (checkpoint == null) {
+            // A GET-only preflight cannot have submitted a study operation.
             journal.abandonUnsent(id)
-            return failed("Cortex checkpoint 读取失败，未发起提交")
+            return failed("Cortex checkpoint 读取失败，未发起 POST")
         }
+        // Record checkpoint and send reservation durably before opening POST.
+        journal.recordCheckpoints(id, checkpoint)
+        val verdict = try { transport.submitOnce(numericId, mark, checkpoint) }
+        catch (_: Exception) { CortexDispatchVerdict.OUTCOME_UNKNOWN }
+        // A separate read-only check is evidence of sync movement, not proof
+        // of this operation's success. A timeout is never followed by a retry.
+        val observedCheckpoint = try { transport.readCheckpoint() } catch (_: Exception) { null }
+        journal.recordCheckpoints(id, checkpoint, observedCheckpoint)
         if (verdict == CortexDispatchVerdict.REJECTED) {
             journal.update(id, CortexWriteState.FAILED,
                 "Cortex 服务明确拒绝了请求。为防止重复操作，本词今日不再自动提交。")
