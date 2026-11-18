@@ -73,3 +73,21 @@ assert 'HttpURLConnection' not in cortex and 'openConnection(' not in cortex
 assert 'CortexStudyAdapter(' not in client, 'Public Open API client must stay separate'
 assert (root / 'docs/CORTEX_INTEGRATION.md').exists()
 print('CORTEX STAGING CHECK PASS: evidence gaps and no-network gate declared')
+
+# Gated implementation is separate from the still-inert legacy adapter.
+wire = (src / 'CortexWireCodec.kt').read_text()
+evidence = (src / 'CortexEvidenceStore.kt').read_text()
+transport = (src / 'CortexHttpTransport.kt').read_text()
+journal = (src / 'CortexWriteJournal.kt').read_text()
+service = (src / 'CortexFeedbackService.kt').read_text()
+assert 'samples.size == 3' in wire and 'contentEquals' in wire
+assert 'importFromLocalTrace' in evidence and 'cortex.wire.verified' in evidence
+assert 'CortexDispatchVerdict.OUTCOME_UNKNOWN' in transport
+assert 'instanceFollowRedirects = false' in transport
+assert 'fun reserve(' in journal and '.commit()' in journal
+assert 'journal.reserve(entry)' in service and 'journal.recordCheckpoints' in service
+assert 'CortexOpenApiReader' in service and 'OfficialSyncAssessment.evaluate' in service
+assert 'CortexFeedbackService(this).ready()' in activity
+assert 'startOfficialTrial(selected.word, selected.expected, autoAttempt = store.autoFeedbackEnabled())' in activity
+assert 'CortexFeedbackService(context).ready()' in notifier
+print('CORTEX ISOLATION CHECK PASS: sample gate, persistent dedup, readback, foreground fallback')
