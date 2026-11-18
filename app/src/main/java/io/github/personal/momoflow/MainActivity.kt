@@ -840,10 +840,18 @@ class MainActivity : Activity() {
     }
 
     private fun describeCortexFailure(error: Throwable?): String = when (error) {
-        is CortexHttpException -> when (error.statusCode) {
-            401, 403 -> "HTTP ${error.statusCode}：服务器拒绝访问。请核对授权类型和接口权限"
-            429 -> "HTTP 429：请求过多，停止连续尝试"
-            else -> "HTTP ${error.statusCode}：服务端未接受请求"
+        is CortexHttpException -> {
+            val stage = when (error.endpoint) {
+                "/api/v1/tokens/exchange" -> "Legacy 交换"
+                "/api/v1/study/checkpoints" -> "检查点读取"
+                "/api/v1/study/overview" -> "概览读取"
+                else -> "Cortex 请求"
+            }
+            when (error.statusCode) {
+                401, 403 -> "$stage · HTTP ${error.statusCode}：服务器拒绝访问。请核对授权类型与接口权限"
+                429 -> "$stage · HTTP 429：触发限流，请停止连续重试"
+                else -> "$stage · HTTP ${error.statusCode}：服务端未接受请求"
+            }
         }
         is ApiException -> error.message ?: "Cortex 响应格式异常"
         else -> "网络或协议异常，尚不能判断凭证是否失效"
