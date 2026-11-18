@@ -59,9 +59,18 @@ assert 'android.permission.BIND_ACCESSIBILITY_SERVICE' in manifest
 print('STATIC CHECK PASS: XML, read-only API, official comparison, scoped read-only inspection, notifications')
 
 assert 'saveReport' in (src / 'OfficialWritebackTrial.kt').read_text()
-assert '复制设备兼容性诊断' in (src / 'MainActivity.kt').read_text()
+assert '复制设备诊断（无 Token）' in activity and 'copyDiagnostics()' in activity
+assert 'MomoPage.STUDY -> renderStudy(column, snapshot)' in activity
+assert 'MomoPage.FLUID -> renderFluid(column)' in activity
+assert 'MomoPage.VERIFY -> renderVerification(column, snapshot)' in activity
+assert 'MomoPage.CONNECTIONS -> renderConnections(column)' in activity
+ui = (src / 'MomoUiKit.kt').read_text()
+assert 'fun bottomNav(' in ui and 'MomoPage.entries.forEach' in ui
+auth = (src / 'CortexAuthHealth.kt').read_text()
+assert 'HTTP_REJECTED' in auth and 'CortexAuthHealthStore' in auth
+assert 'setOnApplyWindowInsetsListener' in activity
 assert '.setData(Uri.parse("momoflow://official-trial/' in notifier
-print('V0.5.5 CHECK PASS: one-shot guarded foreground click, user opt-in, official readback')
+print('V0.6.0 CHECK PASS: one-shot guarded foreground action, four-page UI and persistent truthful auth health')
 
 # Cortex 5.6.10 APK strings are not an authenticated/verified write contract.
 cortex = (src / 'CortexStudyAdapter.kt').read_text()
