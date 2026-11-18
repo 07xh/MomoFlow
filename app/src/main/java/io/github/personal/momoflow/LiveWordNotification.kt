@@ -45,8 +45,9 @@ object LiveWordNotification {
         if (!store.active() || !store.isToday(snap) || snap.words.isEmpty()) return stop(context)
         if (!canPost(context)) return
         val word = snap.words[store.index().coerceIn(0, snap.words.lastIndex)]
+        val directCortex = CortexFeedbackService(context).ready()
         val foreground = store.autoFeedbackEnabled() && MomoInspectionService.isUserEnabled(context)
-        val actionSuffix = if (foreground) "" else "·验证"
+        val actionSuffix = if (directCortex || foreground) "" else "·验证"
         val shownMeaning = if (store.reveal()) store.cachedMeaning(word.id) ?: "暂无离线释义，请在助手内重新同步" else "轻触应用查看释义"
         manager(context).createNotificationChannel(NotificationChannel(CHANNEL, "正在背词", NotificationManager.IMPORTANCE_DEFAULT).apply {
             description = "由用户主动开启的背词会话"
@@ -58,7 +59,11 @@ object LiveWordNotification {
             .setSmallIcon(android.R.drawable.ic_menu_info_details)
             .setContentTitle(word.spelling)
             .setContentText(shownMeaning)
-            .setSubText(if (foreground) "墨墨前台同词单次操作 · 待官方回读" else "墨墨 · 今日 ${snap.progress.finished}/${snap.progress.total} · 人工验证")
+            .setSubText(when {
+                directCortex -> "Cortex 单次提交 · 待官方回读"
+                foreground -> "墨墨前台同词单次操作 · 待官方回读"
+                else -> "墨墨 · 今日 ${snap.progress.finished}/${snap.progress.total} · 人工验证"
+            })
             .setContentIntent(open)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
