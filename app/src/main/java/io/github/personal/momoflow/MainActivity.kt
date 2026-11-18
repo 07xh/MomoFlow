@@ -179,7 +179,9 @@ class MainActivity : Activity() {
         tokenPane.addView(label("开放 API · 学习数据", 18f, ink, true))
         tokenPane.addView(gap(9))
         tokenPane.addView(ui.status(
-            if (store.token() == null) "未配置" else "凭证已保存 · 通过同步验证",
+            if (store.token() == null) "未配置"
+            else if (store.snapshot()?.let { store.isToday(it) } == true) "今日同步已成功"
+            else "凭证已保存 · 等待同步验证",
             positiveState = store.snapshot()?.let { store.isToday(it) } == true
         ))
         tokenPane.addView(gap(8))
@@ -256,7 +258,7 @@ class MainActivity : Activity() {
             setSingleLine(true)
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
             textSize = 13f
-            background = rounded(Color.parseColor("#F1F6FF"), 12, Color.parseColor("#D8E6F7"))
+            background = rounded(ui.subtle, 14, ui.border)
             setPadding(dp(12), dp(8), dp(12), dp(8))
         }
         cortexPane.addView(accessTokenEntry, LinearLayout.LayoutParams(-1, dp(46)))
@@ -278,7 +280,7 @@ class MainActivity : Activity() {
             setSingleLine(true)
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
             textSize = 13f
-            background = rounded(Color.parseColor("#F1F6FF"), 12, Color.parseColor("#D8E6F7"))
+            background = rounded(ui.subtle, 14, ui.border)
             setPadding(dp(12), dp(8), dp(12), dp(8))
         }
         cortexPane.addView(legacyTokenEntry, LinearLayout.LayoutParams(-1, dp(46)))
@@ -422,7 +424,7 @@ class MainActivity : Activity() {
                 setSingleLine(true)
                 inputType = InputType.TYPE_CLASS_TEXT
                 textSize = 14f
-                background = rounded(Color.parseColor("#F1F6FF"), 12, Color.parseColor("#D8E6F7"))
+                background = rounded(ui.subtle, 14, ui.border)
                 setPadding(dp(12), dp(8), dp(12), dp(8))
             }
             trialPane.addView(trialSpelling, LinearLayout.LayoutParams(-1, dp(49)))
@@ -520,53 +522,94 @@ class MainActivity : Activity() {
     }
 
     private fun renderFluid(column: LinearLayout) {
-        val toolsPane = pane()
-        toolsPane.addView(label("流体云与快捷入口", 16f, ink, true))
-        toolsPane.addView(gap(6))
-        toolsPane.addView(label("通知三档按钮可选启用“墨墨前台单次反馈”。这是由墨墨自身处理的前台操作，并非未公开接口或纯后台写入；官方完成情况以回读为准。", 11f, muted))
-        toolsPane.addView(gap(8))
-        toolsPane.addView(button(if (store.autoFeedbackEnabled()) "关闭前台自动反馈" else "开启前台自动反馈（主动授权）", false) {
-            val enable = !store.autoFeedbackEnabled()
-            store.setAutoFeedbackEnabled(enable)
-            if (!enable) OfficialForegroundActionStore(this).clear()
+        val session = pane()
+        session.addView(label("背词会话", 18f, ink, true))
+        session.addView(gap(10))
+        session.addView(ui.status(
+            if (store.active()) "运行中 · 正在展示实时背词通知" else "未启动 · 不发送学习通知",
+            positiveState = store.active()
+        ))
+        session.addView(gap(12))
+        session.addView(button(if (store.active()) "结束背词会话" else "启动背词会话") {
+            toggleSession()
+        })
+        session.addView(gap(8))
+        session.addView(button("打开墨墨 App", false) { openMomo() })
+        session.addView(gap(9))
+        session.addView(label("需要先同步真实待学单词。是否显示流体云由 ColorOS 决定。", 12f, muted))
+        column.addView(session)
+        column.addView(gap(14))
+
+        val feedback = pane()
+        feedback.addView(label("通知按钮 · 单次前台反馈", 18f, ink, true))
+        feedback.addView(gap(9))
+        feedback.addView(ui.status(
+            if (store.autoFeedbackEnabled()) "已启用 · 仍需确认无障碍服务" else "已关闭（默认）",
+            positiveState = store.autoFeedbackEnabled()
+        ))
+        feedback.addView(gap(9))
+        feedback.addView(label(
+            "只有你主动点通知中的认识／模糊／忘记，才尝试对同一个词执行一次墨墨前台操作；60 秒超时，结果以回读为准。",
+            12f, muted
+        ))
+        feedback.addView(gap(10))
+        feedback.addView(button(
+            if (store.autoFeedbackEnabled()) "关闭单次前台反馈" else "开启单次前台反馈（主动授权）",
+            false
+        ) {
+            val enabled = !store.autoFeedbackEnabled()
+            store.setAutoFeedbackEnabled(enabled)
+            if (!enabled) OfficialForegroundActionStore(this).clear()
             LiveWordNotification.publish(this)
             draw()
-            if (enable && !MomoInspectionService.isUserEnabled(this)) {
-                hint("请在系统无障碍设置中手动开启“墨墨页面诊断与单次反馈”，否则仅使用原有人工验证。")
+            if (enabled && !MomoInspectionService.isUserEnabled(this)) {
+                hint("请在系统设置中手动启用“墨墨页面诊断与单次反馈”")
             }
         })
-        toolsPane.addView(gap(5))
-        toolsPane.addView(label("默认关闭。需另外在系统无障碍设置里开启服务；只有你主动点通知按钮才会为当前单词授权一次操作，60 秒过期，错词绝不执行。", 11f, muted))
-        toolsPane.addView(gap(8))
-        toolsPane.addView(label(LiveWordNotification.diagnostics(this), 12f, muted))
-        if (Build.VERSION.SDK_INT >= 36) {
-            toolsPane.addView(gap(8))
-            toolsPane.addView(button(if (store.experimentalPromotion()) "关闭实验性流体云请求" else "开启实验性流体云请求", false) {
-                store.setExperimentalPromotion(!store.experimentalPromotion())
-                LiveWordNotification.publish(this)
-                draw()
-            })
-            toolsPane.addView(gap(5))
-            toolsPane.addView(label("关闭时仅发送标准通知。开启也不保证 ColorOS 展示为流体云；仅适合用户主动开始的学习会话。", 11f, muted))
-            toolsPane.addView(gap(8))
-            toolsPane.addView(button("检查系统实时通知 / 流体云开关", false) {
-                openPromotionSettings()
-            })
-            toolsPane.addView(gap(5))
-            toolsPane.addView(label("部分一加系统还需要单独开启「在流体云显示实时通知」。如系统没有该入口，将打开本应用的通知设置。", 11f, muted))
+        feedback.addView(gap(8))
+        feedback.addView(button("无障碍服务设置", false) {
+            startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+        })
+        column.addView(feedback)
+        column.addView(gap(14))
+
+        column.addView(button(
+            if (showFluidAdvanced) "收起系统设置与诊断" else "展开系统设置与诊断",
+            false
+        ) {
+            showFluidAdvanced = !showFluidAdvanced
+            draw()
+        })
+        if (showFluidAdvanced) {
+            column.addView(gap(12))
+            val advanced = pane()
+            advanced.addView(label("通知兼容与诊断", 17f, ink, true))
+            advanced.addView(gap(8))
+            advanced.addView(label(LiveWordNotification.diagnostics(this), 12f, muted))
+            if (Build.VERSION.SDK_INT >= 36) {
+                advanced.addView(gap(12))
+                advanced.addView(button(
+                    if (store.experimentalPromotion()) "关闭实验性流体云请求" else "开启实验性流体云请求",
+                    false
+                ) {
+                    store.setExperimentalPromotion(!store.experimentalPromotion())
+                    LiveWordNotification.publish(this)
+                    draw()
+                })
+                advanced.addView(gap(7))
+                advanced.addView(label(
+                    "实验性请求默认关闭；开启不保证显示为流体云，只对主动启动的会话生效。",
+                    12f, muted
+                ))
+                advanced.addView(gap(10))
+                advanced.addView(button("打开系统实时通知设置", false) { openPromotionSettings() })
+            }
+            advanced.addView(gap(10))
+            advanced.addView(button("复制设备诊断（无 Token）", false) { copyDiagnostics() })
+            advanced.addView(gap(9))
+            advanced.addView(label("桌面小组件可在系统小组件列表中添加。", 12f, muted))
+            column.addView(advanced)
         }
-        toolsPane.addView(gap(10))
-        toolsPane.addView(horizontal(
-            button(if (store.active()) "结束背词会话" else "启动背词会话") { toggleSession() },
-            button("打开墨墨", false) { openMomo() }
-        ))
-        toolsPane.addView(gap(10))
-        toolsPane.addView(label("可在系统桌面的小组件列表中添加「墨墨流云助手」。流体云显示由 ColorOS 决定。", 12f, muted))
-        toolsPane.addView(gap(8))
-        toolsPane.addView(button("复制设备兼容性诊断（不含 Token）", false) { copyDiagnostics() })
-        column.addView(toolsPane)
-        column.addView(gap(16))
-        column.addView(label("开放 API 用于读取与回验；可选无障碍服务在明确授权的前台同词场景只尝试点击一次，不改变其他 App、不读取账号资料。无需 Root。", 11f, muted))
     }
 
     private fun startTrialForSpelling(snapshot: StudySnapshot, fallback: StudyWord, input: String, mark: LocalMark) {
