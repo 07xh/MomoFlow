@@ -73,9 +73,8 @@ class CortexFeedbackLedger(context: Context) {
     @Synchronized
     fun begin(vocId: String, mark: LocalMark, openApiToken: String): FeedbackOperation {
         val existing = current(vocId, openApiToken)
-        if (existing?.outcome == FeedbackOutcome.PENDING) {
-            check(existing.mark == mark) { "该单词已有待确认的另一种反馈，请先核验或取消" }
-            return existing
+        check(existing?.outcome != FeedbackOutcome.PENDING) {
+            "该单词已有待确认反馈，请先核验或取消，不能重复发起"
         }
         val operation = FeedbackOperation(
             UUID.randomUUID().toString(), vocId, mark, StudyDay.today(),
