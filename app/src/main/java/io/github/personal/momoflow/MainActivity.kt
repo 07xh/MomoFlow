@@ -169,6 +169,8 @@ class MainActivity : Activity() {
                 try {
                     LiveWordNotification.stop(this)
                     store.clearStudyData() // no cross-account vocabulary leakage
+                    CortexCredentialStore(this).clear()
+                    CortexFeedbackLedger(this).clear()
                     store.saveToken(token)
                     WordWidget.updateAll(this)
                     message = "Token 已保存，请点击同步；今天需先在墨墨 App 完成初始化。"
@@ -177,7 +179,10 @@ class MainActivity : Activity() {
             },
             button("清除授权", false) {
                 LiveWordNotification.stop(this)
-                store.forgetToken(); store.clearStudyData(); message = "授权与学习缓存已清除"; draw()
+                store.forgetToken(); store.clearStudyData()
+                CortexCredentialStore(this).clear()
+                CortexFeedbackLedger(this).clear()
+                message = "授权与学习缓存已清除"; draw()
                 WordWidget.updateAll(this)
             }
         ))
@@ -362,7 +367,7 @@ class MainActivity : Activity() {
             cortexPane.addView(gap(7))
             cortexPane.addView(label(
                 if (ledger == null) "当前词：无待确认事务"
-                else "当前词：${ledger.outcome.label} · ${ledger.mark.label}（${ledger.explanation}）",
+                else "当前词：${ledger.outcome.label} · ${ledger.mark.label}（官方前台反馈回读：${ledger.explanation}）",
                 12f, if (ledger?.outcome == FeedbackOutcome.FAILED) Color.parseColor("#A34A36") else muted
             ))
         }
