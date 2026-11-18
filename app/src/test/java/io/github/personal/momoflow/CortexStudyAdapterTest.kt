@@ -31,7 +31,7 @@ class CortexStudyAdapterTest {
         assertEquals(LocalMark.FAMILIAR, known.selectedMark)
         assertEquals(setOf(CortexResponseTag.FAMILIAR), known.responseCandidates)
         assertEquals(
-            setOf(CortexResponseTag.UNCERTAIN, CortexResponseTag.VAGUE),
+            setOf(CortexResponseTag.UNCERTAIN),
             vague.responseCandidates
         )
         assertEquals(setOf(CortexResponseTag.FORGET), forgotten.responseCandidates)
