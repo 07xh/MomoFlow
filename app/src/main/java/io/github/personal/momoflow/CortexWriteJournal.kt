@@ -15,12 +15,16 @@ data class CortexWriteEntry(
     val before: CortexOfficialSnapshot,
     val state: CortexWriteState,
     val message: String,
+    val checkpointBefore: Long? = null,
+    val checkpointAfter: Long? = null,
 ) {
     fun toJson(): JSONObject = JSONObject()
         .put("key", key).put("voc_id", vocId).put("mark", mark.wire)
         .put("day", day).put("before_record", before.record?.toJson())
         .put("before_today", before.today?.toJson()).put("state", state.name)
         .put("message", message.take(240))
+        .put("checkpoint_before", checkpointBefore)
+        .put("checkpoint_after", checkpointAfter)
 
     companion object {
         fun fromJson(value: JSONObject): CortexWriteEntry = CortexWriteEntry(
@@ -31,7 +35,9 @@ data class CortexWriteEntry(
                 value.optJSONObject("before_record")?.let(OfficialRecord::parse),
                 value.optJSONObject("before_today")?.let(OfficialTodayState::parse)
             ),
-            CortexWriteState.valueOf(value.getString("state")), value.optString("message")
+            CortexWriteState.valueOf(value.getString("state")), value.optString("message"),
+            (value.opt("checkpoint_before") as? Number)?.toLong(),
+            (value.opt("checkpoint_after") as? Number)?.toLong()
         )
     }
 }
@@ -72,6 +78,13 @@ class CortexWriteJournal(context: Context) {
         val next = old.copy(state = state, message = reason)
         check(prefs.edit().putString(slot(key), next.toJson().toString()).commit())
         return next
+    }
+
+    @Synchronized fun recordCheckpoints(key: String, before: Long, after: Long? = null) {
+        val old = get(key) ?: error("Missing durable operation before checkpoint update")
+        check(prefs.edit().putString(slot(key), old.copy(
+            checkpointBefore = before, checkpointAfter = after
+        ).toJson().toString()).commit())
     }
 
     /** Safe only when the transport proved no POST was attempted. */
