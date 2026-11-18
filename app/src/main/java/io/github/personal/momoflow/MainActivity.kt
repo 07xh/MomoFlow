@@ -569,7 +569,15 @@ class MainActivity : Activity() {
                     CortexFeedbackLedger(this).recordReadback(
                         trial.wordId, token, evaluation.status, trialStatus
                     )
-                    OfficialTrialStore(this).saveReport(trialStatus)
+                    val trials = OfficialTrialStore(this)
+                    trials.saveReport(trialStatus)
+                    if (evaluation.status in setOf(
+                            OfficialSyncStatus.OBSERVED_MATCH,
+                            OfficialSyncStatus.CONFLICT,
+                            OfficialSyncStatus.INVALID_WORD
+                        )) {
+                        trials.finish()
+                    }
                     draw()
                 }
             } catch (error: Exception) {
