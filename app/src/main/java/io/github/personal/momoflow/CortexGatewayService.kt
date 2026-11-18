@@ -5,7 +5,8 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 /** Typed HTTP failure without exposing request/response credentials. */
-class CortexHttpException(val statusCode: Int) : Exception("Cortex 接口返回 HTTP $statusCode")
+class CortexHttpException(val statusCode: Int, val endpoint: String) :
+    Exception("Cortex HTTP $statusCode")
 
 /**
  * Isolated Cortex HTTP boundary, based on the supplied 5.6.10 gateway evidence.
@@ -61,7 +62,7 @@ class CortexGatewayService {
                 }
             }
             val status = connection.responseCode
-            if (status !in 200..299) throw CortexHttpException(status)
+            if (status !in 200..299) throw CortexHttpException(status, path)
             val raw = connection.inputStream.use { input ->
                 val bytes = input.readBytes()
                 if (bytes.size > 512 * 1024) throw ApiException("Cortex 响应过大")
