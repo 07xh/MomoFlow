@@ -195,7 +195,9 @@ class MainActivity : Activity() {
                 try {
                     LiveWordNotification.stop(this)
                     store.clearStudyData() // no cross-account vocabulary leakage
+                    cortexRequestRevision++
                     CortexCredentialStore(this).clear()
+                    CortexAuthHealthStore(this).clear()
                     CortexFeedbackLedger(this).clear()
                     store.saveToken(token)
                     WordWidget.updateAll(this)
@@ -206,7 +208,9 @@ class MainActivity : Activity() {
             button("清除授权", false) {
                 LiveWordNotification.stop(this)
                 store.forgetToken(); store.clearStudyData()
+                cortexRequestRevision++
                 CortexCredentialStore(this).clear()
+                CortexAuthHealthStore(this).clear()
                 CortexFeedbackLedger(this).clear()
                 message = "授权与学习缓存已清除"; draw()
                 WordWidget.updateAll(this)
@@ -218,15 +222,24 @@ class MainActivity : Activity() {
         // Cortex connectivity and persisted result are independent of the
         // existing notification and foreground action path.
         val cortexPane = pane()
-        cortexPane.addView(label("Cortex 连接与三态结果", 16f, ink, true))
-        cortexPane.addView(gap(6))
+        cortexPane.addView(label("Cortex 授权", 18f, ink, true))
+        cortexPane.addView(gap(9))
         val cortexCredentials = CortexCredentialStore(this)
-        cortexPane.addView(label(
-            if (cortexCredentials.accessToken() == null)
-                "尚未配置 Cortex 授权（与开放 API Token 独立）。"
-            else "已加密保存 Cortex 授权；可读取检查点。",
-            12f, muted
+        val health = CortexAuthHealthStore(this).view(cortexCredentials.accessToken() != null)
+        cortexPane.addView(ui.status(
+            health.headline,
+            positiveState = health.lastResult == CortexCheckResult.READ_OK && health.hasToken,
+            warningState = health.lastResult in setOf(CortexCheckResult.HTTP_REJECTED, CortexCheckResult.RATE_LIMITED)
         ))
+        cortexPane.addView(gap(7))
+        cortexPane.addView(label(health.detail, 12f, muted))
+        if (health.checkedAtMs > 0L && health.hasToken) {
+            cortexPane.addView(gap(5))
+            cortexPane.addView(label(
+                "上次检查 " + java.text.SimpleDateFormat("MM-dd HH:mm", java.util.Locale.getDefault())
+                    .format(java.util.Date(health.checkedAtMs)), 11f, muted
+            ))
+        }
         val cortexOpenToken = store.token()
         if (snapshot != null && snapshot.words.isNotEmpty() && cortexOpenToken != null) {
             val current = snapshot.words[store.index().coerceIn(0, snapshot.words.lastIndex)]
@@ -252,8 +265,8 @@ class MainActivity : Activity() {
             }
         }
         cortexPane.addView(gap(9))
-        cortexPane.addView(label("方式一：直接导入 Cortex Bearer", 12f, accent, true))
-        cortexPane.addView(label("仅使用本人墨墨登录会话中的 Cortex Token；先验证只读接口，成功才加密保存。", 11f, muted))
+        cortexPane.addView(label("直接导入 Bearer", 14f, ink, true))
+        cortexPane.addView(label("只验证只读接口；成功后加密保存。", 12f, muted))
         cortexPane.addView(gap(7))
         val accessTokenEntry = EditText(this).apply {
             hint = "粘贴 Cortex Access Token（可含 Bearer 前缀）"
@@ -271,8 +284,12 @@ class MainActivity : Activity() {
             importCortexAccessToken(candidate)
         }.apply { isEnabled = !cortexBusy })
         cortexPane.addView(gap(13))
-        cortexPane.addView(label("方式二：Legacy Token 交换（备用）", 12f, accent, true))
-        cortexPane.addView(gap(7))
+        cortexPane.addView(button(if (showLegacy) "收起备用交换方式" else "使用 Legacy Token 交换（备用）", false) {
+            showLegacy = !showLegacy
+            draw()
+        })
+        if (showLegacy) {
+        cortexPane.addView(gap(8))
         val legacyTokenEntry = EditText(this).apply {
             hint = "旧版登录 Token（仅用于单次交换）"
             setSingleLine(true)
@@ -290,7 +307,20 @@ class MainActivity : Activity() {
         }
         exchangeButton.isEnabled = !cortexBusy
         cortexPane.addView(exchangeButton)
+        }
+        cortexPane.addView(gap(12))
+        cortexPane.addView(button("检查 Cortex 只读连接", false) { inspectCortex() }.apply {
+            isEnabled = !cortexBusy && cortexCredentials.accessToken() != null
+        })
         cortexPane.addView(gap(7))
+        cortexPane.addView(button("清除 Cortex 凭证与核验状态", false) {
+            cortexRequestRevision++
+            cortexCredentials.clear()
+            CortexAuthHealthStore(this).clear()
+            cortexStatus = "已清除 Cortex 凭证和上次核验记录"
+            draw()
+        })
+        /*
         cortexPane.addView(horizontal(
             button("检查连接与检查点", false) { inspectCortex() },
             button("清除 Cortex 授权", false) {
@@ -299,14 +329,16 @@ class MainActivity : Activity() {
                 draw()
             }
         ))
+        */
         if (cortexStatus.isNotBlank()) {
-            cortexPane.addView(gap(7))
-            cortexPane.addView(label(cortexStatus, 12f, muted))
+            cortexPane.addView(gap(9))
+            val isError = cortexStatus.contains("403") || cortexStatus.contains("失败") || cortexStatus.contains("拒绝")
+            cortexPane.addView(ui.status(cortexStatus, warningState = isError))
         }
         cortexPane.addView(gap(6))
         cortexPane.addView(label(
-            "Cortex Bearer 可直接导入，无需先找 Legacy Token；上传反馈仍需真实协议与服务端回读验证。原有前台反馈可以继续使用。",
-            11f, muted
+            "Cortex 目前仅提供连接检查。三态后台写回尚未完成；可使用前台核验功能。",
+            12f, muted
         ))
         column.addView(cortexPane)
         column.addView(gap(14))
