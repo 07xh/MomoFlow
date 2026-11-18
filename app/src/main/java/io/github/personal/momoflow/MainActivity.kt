@@ -385,6 +385,27 @@ class MainActivity : Activity() {
             }
         }
         cortexPane.addView(gap(9))
+        cortexPane.addView(label("方式一：直接导入 Cortex Bearer", 12f, accent, true))
+        cortexPane.addView(label("仅使用本人墨墨登录会话中的 Cortex Token；先验证只读接口，成功才加密保存。", 11f, muted))
+        cortexPane.addView(gap(7))
+        val accessTokenEntry = EditText(this).apply {
+            hint = "粘贴 Cortex Access Token（可含 Bearer 前缀）"
+            setSingleLine(true)
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            textSize = 13f
+            background = rounded(Color.parseColor("#F1F6FF"), 12, Color.parseColor("#D8E6F7"))
+            setPadding(dp(12), dp(8), dp(12), dp(8))
+        }
+        cortexPane.addView(accessTokenEntry, LinearLayout.LayoutParams(-1, dp(46)))
+        cortexPane.addView(gap(7))
+        cortexPane.addView(button(if (cortexBusy) "检查中…" else "验证并保存 Cortex Token", false) {
+            val candidate = accessTokenEntry.text.toString()
+            accessTokenEntry.text.clear()
+            importCortexAccessToken(candidate)
+        }.apply { isEnabled = !cortexBusy })
+        cortexPane.addView(gap(13))
+        cortexPane.addView(label("方式二：Legacy Token 交换（备用）", 12f, accent, true))
+        cortexPane.addView(gap(7))
         val legacyTokenEntry = EditText(this).apply {
             hint = "旧版登录 Token（仅用于单次交换）"
             setSingleLine(true)
@@ -417,7 +438,7 @@ class MainActivity : Activity() {
         }
         cortexPane.addView(gap(6))
         cortexPane.addView(label(
-            "已接入授权交换和只读同步检查；Cortex 直接上传仍需真实字段号及同词回读验证。原有前台反馈可以继续使用。",
+            "Cortex Bearer 可直接导入，无需先找 Legacy Token；上传反馈仍需真实协议与服务端回读验证。原有前台反馈可以继续使用。",
             11f, muted
         ))
         column.addView(cortexPane)
@@ -590,6 +611,35 @@ class MainActivity : Activity() {
         }.start()
     }
 
+    /** Validate a token against the real read-only Cortex endpoint before storing it. */
+    private fun importCortexAccessToken(raw: String) {
+        if (cortexBusy) return
+        val candidate = try { CortexTokenInput.normalize(raw) }
+            catch (_: IllegalArgumentException) {
+                return hint("请输入有效的 Cortex Access Token；不能使用开放 API Token")
+            }
+        cortexBusy = true
+        cortexStatus = "正在验证 Cortex Token，只读取检查点…"
+        draw()
+        Thread {
+            try {
+                CortexGatewayService().checkpoints(candidate)
+                CortexCredentialStore(this).saveAccessToken(candidate)
+                runOnUiThread {
+                    cortexBusy = false
+                    cortexStatus = "Cortex Token 验证成功，已用 Android Keystore 加密保存；后台写回仍未启用"
+                    draw()
+                }
+            } catch (error: Exception) {
+                runOnUiThread {
+                    cortexBusy = false
+                    cortexStatus = "Cortex Token 验证失败：${error.message ?: "网络异常"}；未替换已有授权"
+                    draw()
+                }
+            }
+        }.start()
+    }
+
     private fun exchangeCortex(legacyToken: String) {
         if (cortexBusy) return
         if (legacyToken.isBlank()) return hint("请填写本人旧版登录 Token；不能自动把开放 API Token 当作 Cortex 登录凭证")
@@ -598,11 +648,13 @@ class MainActivity : Activity() {
         draw()
         Thread {
             try {
-                val access = CortexGatewayService().exchangeLegacyToken(legacyToken)
+                val gateway = CortexGatewayService()
+                val access = gateway.exchangeLegacyToken(legacyToken)
+                gateway.checkpoints(access)
                 CortexCredentialStore(this).saveAccessToken(access)
                 runOnUiThread {
                     cortexBusy = false
-                    cortexStatus = "Cortex 授权交换成功，已独立加密存储；尚未执行任何写回"
+                    cortexStatus = "Cortex 授权交换并通过只读验证，已独立加密存储；尚未执行任何写回"
                     draw()
                 }
             } catch (error: Exception) {
