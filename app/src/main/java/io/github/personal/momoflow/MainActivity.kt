@@ -3,7 +3,8 @@ package io.github.personal.momoflow
 import android.Manifest
 import android.content.ClipData
 import android.content.ClipboardManager
-import android.app.Activity
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -25,7 +26,7 @@ import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 
-class MainActivity : Activity() {
+class MainActivity : ComponentActivity() {
     companion object {
         const val ACTION_START_OFFICIAL_TRIAL = "io.github.personal.momoflow.START_OFFICIAL_TRIAL"
         const val EXTRA_TRIAL_WORD_ID = "official_trial_word_id"
@@ -127,51 +128,136 @@ class MainActivity : Activity() {
     private fun horizontal(vararg children: View): LinearLayout = ui.row(*children)
     private fun hint(text: String) { Toast.makeText(this, text, Toast.LENGTH_LONG).show() }
 
+    /** Shiguang Compose is the visible presentation layer; existing API and
+     * one-shot foreground/Cortex read-only execution paths stay unchanged. */
     private fun draw() {
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setBackgroundColor(ui.background)
-            fitsSystemWindows = true
-        }
-        if (Build.VERSION.SDK_INT >= 30) {
-            root.setOnApplyWindowInsetsListener { view, insets ->
-                val bars = insets.getInsets(android.view.WindowInsets.Type.systemBars())
-                view.setPadding(0, bars.top, 0, bars.bottom)
-                insets
-            }
-        }
-        val scroll = ScrollView(this).apply {
-            isFillViewport = true
-            clipToPadding = false
-            overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
-        }
-        val column = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(16), dp(20), dp(16), dp(24))
-        }
-        scroll.addView(column)
-        root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
-        root.addView(ui.bottomNav(page) { chosen ->
-            if (page != chosen) {
-                page = chosen
+        val today = store.snapshot()?.takeIf(store::isToday)
+        val selected = today?.words?.getOrNull(store.index().coerceIn(0, (today.words.size - 1).coerceAtLeast(0)))
+        val openToken = store.token()
+        val local = LocalFeedbackStore(this)
+        val credentials = CortexCredentialStore(this)
+        val model = MomoComposeModel(
+            page = page, snapshot = today, index = store.index(), reveal = store.reveal(),
+            meaning = selected?.let { store.cachedMeaning(it.id) },
+            mark = selected?.let { local.markFor(it.id) }, localCounts = local.counts(),
+            syncing = syncing, message = message, querying = queryingWordId != null,
+            hasOpenToken = openToken != null, active = store.active(),
+            autoFeedback = store.autoFeedbackEnabled(), fluidAdvanced = showFluidAdvanced,
+            verifyAdvanced = showVerificationDiagnostics, legacyExpanded = showLegacy,
+            promotion = store.experimentalPromotion(),
+            trialBusy = trialBusy, trialStatus = trialStatus,
+            pending = OfficialTrialStore(this).pending(),
+            recent = openToken?.let { CortexFeedbackLedger(this).recent(it) }.orEmpty(),
+            report = OfficialTrialStore(this).lastReport(),
+            foregroundReport = OfficialForegroundActionStore(this).summary(),
+            inspectionReport = MomoInspectionStore(this).lastReport(),
+            notificationDiagnostics = if (showFluidAdvanced) LiveWordNotification.diagnostics(this) else "",
+            cortexHealth = CortexAuthHealthStore(this).view(credentials.accessToken() != null),
+            cortexBusy = cortexBusy, cortexStatus = cortexStatus
+        )
+        val actions = MomoComposeActions(
+            navigate = { chosen -> if (page != chosen) { page = chosen; draw() } },
+            sync = { refresh() },
+            previous = { today?.let { move(-1, it.words.size) } },
+            next = { today?.let { move(1, it.words.size) } },
+            toggleMeaning = {
+                store.setReveal(!store.reveal())
+                draw()
+                if (store.reveal() && selected != null && store.cachedMeaning(selected.id) == null) queryMeaning(selected)
+                LiveWordNotification.publish(this)
+            },
+            lookupMeaning = { selected?.let { queryMeaning(it) } },
+            localRate = { mark -> selected?.let { recordLocal(it, mark) } },
+            toggleSession = { toggleSession() },
+            openMomo = { openMomo() },
+            toggleAutoFeedback = {
+                val enabled = !store.autoFeedbackEnabled()
+                store.setAutoFeedbackEnabled(enabled)
+                if (!enabled) OfficialForegroundActionStore(this).clear()
+                LiveWordNotification.publish(this)
+                draw()
+                if (enabled && !MomoInspectionService.isUserEnabled(this)) {
+                    hint("请手动启用墨墨页面诊断与单次反馈无障碍服务")
+                }
+            },
+            accessibilitySettings = { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) },
+            toggleFluidAdvanced = { showFluidAdvanced = !showFluidAdvanced; draw() },
+            togglePromotion = {
+                if (Build.VERSION.SDK_INT >= 36) {
+                    store.setExperimentalPromotion(!store.experimentalPromotion())
+                    LiveWordNotification.publish(this)
+                    draw()
+                } else hint("系统版本不支持流体云提升请求")
+            },
+            promotionSettings = { openPromotionSettings() },
+            copyDiagnostics = { copyDiagnostics() },
+            startTrial = { spelling, mark ->
+                if (today != null && selected != null)
+                    startTrialForSpelling(today, selected, spelling, mark)
+                else hint("请先同步今日待学单词")
+            },
+            inspectWord = { if (selected != null) inspectMomo(selected) else hint("无可识别单词") },
+            verify = { verifyOfficialTrial() },
+            cancel = {
+                val trial = OfficialTrialStore(this).pending()
+                if (trial != null) openToken?.let { CortexFeedbackLedger(this).cancel(trial.wordId, it) }
+                OfficialTrialStore(this).clear()
+                trialStatus = "已取消本次验证，未确认官方写回"
+                draw()
+            },
+            copyReport = {
+                getSystemService(ClipboardManager::class.java).setPrimaryClip(
+                    ClipData.newPlainText("MomoFlow official readback", OfficialTrialStore(this).lastReport()))
+                hint("已复制官方记录核验结果，不代表本应用成功写回")
+            },
+            toggleVerifyAdvanced = { showVerificationDiagnostics = !showVerificationDiagnostics; draw() },
+            copyInspection = {
+                getSystemService(ClipboardManager::class.java).setPrimaryClip(
+                    ClipData.newPlainText("MomoFlow inspection", MomoInspectionStore(this).lastReport()))
+                hint("已复制脱敏识别报告")
+            },
+            saveOpenToken = { token ->
+                if (token.isBlank()) hint("请输入开放 API Token") else try {
+                    LiveWordNotification.stop(this)
+                    store.clearStudyData()
+                    cortexRequestRevision++
+                    cortexBusy = false
+                    CortexCredentialStore(this).clear()
+                    CortexAuthHealthStore(this).clear()
+                    CortexFeedbackLedger(this).clear()
+                    store.saveToken(token)
+                    WordWidget.updateAll(this)
+                    message = "凭证已保存，请同步今日单词"
+                    draw()
+                } catch (_: Exception) { hint("保存 Token 失败，请检查设备安全设置") }
+            },
+            clearOpenToken = {
+                LiveWordNotification.stop(this)
+                store.forgetToken()
+                store.clearStudyData()
+                cortexRequestRevision++
+                cortexBusy = false
+                CortexCredentialStore(this).clear()
+                CortexAuthHealthStore(this).clear()
+                CortexFeedbackLedger(this).clear()
+                WordWidget.updateAll(this)
+                message = "账号与缓存已清除"
+                draw()
+            },
+            saveCortex = { importCortexAccessToken(it) },
+            legacyExchange = { exchangeCortex(it) },
+            toggleLegacy = { showLegacy = !showLegacy; draw() },
+            checkCortex = { inspectCortex() },
+            clearCortex = {
+                cortexRequestRevision++
+                cortexBusy = false
+                CortexCredentialStore(this).clear()
+                CortexAuthHealthStore(this).clear()
+                cortexStatus = "Cortex 凭证与只读核验已清除"
                 draw()
             }
-        }, LinearLayout.LayoutParams(-1, -2))
-        setContentView(root)
-
-        column.addView(label("MomoFlow  /  墨墨流云", 12f, accent, true))
-        column.addView(gap(6))
-        column.addView(label(page.title, 27f, ink, true))
-        column.addView(gap(3))
-        column.addView(label(page.subtitle, 13f, muted))
-        column.addView(gap(18))
-        val snapshot = store.snapshot()?.takeIf { store.isToday(it) }
-        when (page) {
-            MomoPage.STUDY -> renderStudy(column, snapshot)
-            MomoPage.FLUID -> renderFluid(column)
-            MomoPage.VERIFY -> renderVerification(column, snapshot)
-            MomoPage.CONNECTIONS -> renderConnections(column)
-        }
+        )
+        setContent { ShiguangTheme { MomoShiguangApp(model, actions) } }
     }
 
     private fun renderConnections(column: LinearLayout) {
@@ -962,7 +1048,7 @@ class MainActivity : Activity() {
         store.setActive(true); LiveWordNotification.publish(this); draw()
     }
 
-    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == 100 && grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) toggleSession()
         else if (requestCode == 100) hint("未授予通知权限，背词会话不会启动")
