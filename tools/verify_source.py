@@ -60,17 +60,18 @@ print('STATIC CHECK PASS: XML, read-only API, official comparison, scoped read-o
 
 assert 'saveReport' in (src / 'OfficialWritebackTrial.kt').read_text()
 assert '复制设备诊断（无 Token）' in activity and 'copyDiagnostics()' in activity
-assert 'MomoPage.STUDY -> renderStudy(column, snapshot)' in activity
-assert 'MomoPage.FLUID -> renderFluid(column)' in activity
-assert 'MomoPage.VERIFY -> renderVerification(column, snapshot)' in activity
-assert 'MomoPage.CONNECTIONS -> renderConnections(column)' in activity
+assert 'MomoShiguangApp(model, actions)' in activity
+assert 'class MainActivity : ComponentActivity()' in activity
+compose = (src / 'MomoShiguangUi.kt').read_text()
+assert 'VocabGlassDock(' in compose and 'WordSection' in compose
+assert 'Cortex 后台三态提交尚未启用' in compose
 ui = (src / 'MomoUiKit.kt').read_text()
 assert 'fun bottomNav(' in ui and 'MomoPage.entries.forEach' in ui
 auth = (src / 'CortexAuthHealth.kt').read_text()
 assert 'HTTP_REJECTED' in auth and 'CortexAuthHealthStore' in auth
-assert 'setOnApplyWindowInsetsListener' in activity
+assert 'windowInsetsPadding(WindowInsets.safeDrawing)' in compose
 assert '.setData(Uri.parse("momoflow://official-trial/' in notifier
-print('V0.6.0 CHECK PASS: one-shot guarded foreground action, four-page UI and persistent truthful auth health')
+print('V0.7.0 CHECK PASS: one-shot guarded foreground action, four-page UI and persistent truthful auth health')
 
 # Cortex 5.6.10 APK strings are not an authenticated/verified write contract.
 cortex = (src / 'CortexStudyAdapter.kt').read_text()
@@ -82,3 +83,9 @@ assert 'HttpURLConnection' not in cortex and 'openConnection(' not in cortex
 assert 'CortexStudyAdapter(' not in client, 'Public Open API client must stay separate'
 assert (root / 'docs/CORTEX_INTEGRATION.md').exists()
 print('CORTEX STAGING CHECK PASS: evidence gaps and no-network gate declared')
+
+source_reuse = (src / 'VocabComponents.kt').read_text()
+assert 'fun VocabGlassDock(' in source_reuse and 'fun WordMetric(' in source_reuse
+assert 'fun WordSection(' in source_reuse and '"fluid" to "流体云"' in source_reuse
+assert (src / 'Theme.kt').exists()
+print('SHIGUANG SOURCE REUSE CHECK PASS: copied Compose dock, metrics, sections, palette')
