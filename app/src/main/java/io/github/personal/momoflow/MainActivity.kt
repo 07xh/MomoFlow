@@ -1048,7 +1048,7 @@ class MainActivity : ComponentActivity() {
         store.setActive(true); LiveWordNotification.publish(this); draw()
     }
 
-    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == 100 && grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) toggleSession()
         else if (requestCode == 100) hint("未授予通知权限，背词会话不会启动")
