@@ -199,14 +199,14 @@ private fun StudyContent(m: MomoComposeModel, a: MomoComposeActions) {
                     Hint("已完成 / 今日总量")
                 }
                 Column(horizontalAlignment = Alignment.End) {
-                    WordMetric("未完成", m.snapshot.words.size, "词")
+                    WordMetric("未完成", m.snapshot?.words?.size ?: 0, "词")
                 }
             }
             LinearProgressIndicator(progress = {
                 if (p.total == 0) 0f else (p.finished.toFloat() / p.total).coerceIn(0f, 1f)
             }, modifier = Modifier.fillMaxWidth().height(7.dp),
                 color = QuietBlue, trackColor = SoftBlue)
-            Hint("同步于 " + SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(m.snapshot.updatedAtMs)))
+            Hint("同步于 " + SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(m.snapshot?.updatedAtMs ?: 0L)))
         }
         MainAction(if (m.syncing) "同步中…" else "同步今日单词",
             enabled = !m.syncing && m.hasOpenToken, onClick = a.sync)
