@@ -62,6 +62,7 @@ assert 'saveReport' in (src / 'OfficialWritebackTrial.kt').read_text()
 assert '复制设备诊断（无 Token）' in activity and 'copyDiagnostics()' in activity
 assert 'MomoShiguangApp(model, actions)' in activity
 assert 'class MainActivity : ComponentActivity()' in activity
+assert 'permissions: Array<String>, grantResults: IntArray)' in activity, 'ComponentActivity callback signature regression'
 compose = (src / 'MomoShiguangUi.kt').read_text()
 assert 'VocabGlassDock(' in compose and 'WordSection' in compose
 assert 'Cortex 后台三态提交尚未启用' in compose
